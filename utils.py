@@ -78,7 +78,15 @@ def load_local_dataset(dataset_path, subset):
 
             elif dataset_path.endswith('.json'):
                 with open(dataset_path, 'r', encoding='utf8') as f:
-                    df = pd.DataFrame(data = json.load(f)['data'][subset])
+                    data = json.load(f)
+                    if 'data' in data:
+                        if subset in data['data']:
+                            df = pd.DataFrame(data['data'][subset])
+                        else:
+                            raise gr.Error(f"Ensure that the subset names are correct! Found {list(data.keys())}, but expected ['train', 'val', 'test']")
+                        
+                    else:
+                        raise gr.Error("Ensure that your .json file conforms to the predefined structure.")
             else:
                 raise gr.Error("Please load a .csv, .xlsx or .json file!")
 
