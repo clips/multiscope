@@ -1,6 +1,7 @@
 
 import pandas as pd
 import numpy as np
+import os
 import torch
 import json
 import gradio as gr
@@ -12,8 +13,6 @@ from datasets import load_dataset
 import plotly.graph_objects as go
 from itertools import combinations
 from finetune import finetune_transformer
-
-
 
 
 def create_cooccurrence_matrix(column_with_lists):
@@ -47,6 +46,7 @@ def create_cooccurrence_matrix(column_with_lists):
         xaxis_title="Label",
         yaxis_title="Label"
     )
+
     return fig
 
 
@@ -138,6 +138,14 @@ def load_data(dataset_source, dataset_path):
         label_counts.update_layout(xaxis_type='category')
 
         correlation_matrix = create_cooccurrence_matrix(train_df.labels)
+
+        try:
+            os.mkdir("./visualizations")
+        except FileExistsError:
+            pass
+
+        label_counts.write_html("./visualizations/label_counts.html")
+        correlation_matrix.write_html("./visualizations/cooc_matrix.html")
 
         # return train_df, val_df, test_df, label_counts, correlation_matrix
         return (

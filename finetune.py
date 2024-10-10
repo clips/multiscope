@@ -195,7 +195,6 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
     test_metrics = test_results.metrics
 
     preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
-    print(test_metrics)
 
     # Log metrics to wandb
     wandb.log(test_metrics)
