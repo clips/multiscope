@@ -1,0 +1,7 @@
+numpy==1.26.4
+pandas==2.2.2
+transformers==4.44.2
+scikit-learn==1.5.2
+plotly==5.24.1
+wandb==0.18.1
+gradio==4.44.0
