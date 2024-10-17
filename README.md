@@ -9,3 +9,6 @@ This repository contains the code for a multi-label text classification pipeline
 
 ### Google Colab
 Use Multiscope in Google Colab:
+
+### User interface
+To run the pipeline in a Gradio User Interface, run (CUDA_VISIBLE_DEVICES=X) python app.py and browse to http://127.0.0.1:7860. 
