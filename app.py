@@ -2,8 +2,7 @@ import gradio as gr
 import pandas as pd
 from datasets import load_dataset
 import plotly.graph_objects as go
-from utils import create_cooccurrence_matrix, load_data, train_model, wandb_report, toggle_parameter_visibility
-from utils import load_huggingface_dataset, load_local_dataset
+from utils import create_cooccurrence_matrix, load_data, train_model, wandb_report, toggle_parameter_visibility, load_huggingface_dataset, load_local_dataset
 from finetune import finetune_transformer
 import torch
 import wandb
@@ -35,6 +34,10 @@ theme = gr.themes.Soft(
     button_primary_background_fill_hover='*secondary_400',
     block_label_background_fill='*primary_50',
 )
+
+def show_error(msg):
+    print('triggered')
+    raise(gr.Error(msg))
 
 
 #APP INTERFACE______________________________________________________________________________________________
@@ -85,7 +88,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
 
 
     # Load data function linking
-    load_data_button.click(
+    load_data_button.click( 
         fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)),
         inputs=None,
         outputs=[dataset_statistics, train_df, val_df, test_df, label_counts_plot, correlation_matrix_plot]
@@ -117,6 +120,8 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         with gr.Row():
             cnf_matrix = gr.Plot(label="Confusion Matrix", visible=True)
 
+    error_output = gr.Markdown(value="", visible=False)
+    result_output = gr.Textbox(label="Result")
 
     train_model_button.click(
         fn=lambda: gr.update(interactive=False), # disable button after clicking 
@@ -129,13 +134,15 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     ).then(
         fn=train_model,
         inputs=[clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate],
-        outputs=[metric_df, report_df, cnf_matrix]
+        outputs=[metric_df, report_df, cnf_matrix, error_output]
+    ).then(
+        fn=show_error,
+        inputs=error_output,  # Pass the error message to this function
     ).then(
         fn=lambda: gr.update(interactive=True),  # enable button after model is done training
         inputs=None, 
         outputs=train_model_button
     )
-    # to-do: disable button if not finished!
 
 # Launch Gradio app
 if __name__ == "__main__":

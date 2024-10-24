@@ -12,6 +12,7 @@ import pandas as pd
 from mlcm import cm
 import numpy as np
 import plotly.graph_objects as go
+import safetensors
 
 def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', title='Confusion Matrix', save_path=None, labels=None, annotate=True):
     """
@@ -140,22 +141,26 @@ def compute_metrics(pred):
  
 
 def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, output_dir="./results", save_best_metric="macro_f1"):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-
     train_labels, val_labels, test_labels = train_df.labels.tolist(), val_df.labels.tolist(), test_df.labels.tolist() 
     mlb = MultiLabelBinarizer()
     mlb.fit(train_labels + val_labels + test_labels)
     num_labels = len(mlb.classes_)
     
+    try:
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, problem_type="multi_label_classification")  # Example with 3 labels
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except OSError:
+        raise gr.Error(f"Model '{model_name}' might not exist. Visit https://huggingface.co/models for an overview of remote models, or load a valid local model.")
+    
     train_dataset = prepare_data(train_df, mlb, tokenizer)
     val_dataset = prepare_data(val_df, mlb, tokenizer)
     test_dataset = prepare_data(test_df, mlb, tokenizer)
 
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, problem_type="multi_label_classification")  # Example with 3 labels
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
     n_epochs = 5
+    print(batch_size)
 
     training_args = TrainingArguments(
         learning_rate=float(learning_rate),
@@ -181,39 +186,46 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
     )
 
     # Train and evaluate
-    trainer.train()
+    try:
+        trainer.train()
 
     # Load best model based on metric
-    best_model_path = os.path.join(output_dir, "pytorch_model.bin")
-    if os.path.exists(best_model_path):
-        model = AutoModelForSequenceClassification.from_pretrained(output_dir)
+        best_model_path = os.path.join(output_dir, "pytorch_model.bin")
+        if os.path.exists(best_model_path):
+            model = AutoModelForSequenceClassification.from_pretrained(output_dir)
 
-    # Evaluate on test set
-    test_results = trainer.predict(test_dataset)
-    logits = test_results.predictions
-    label_ids = test_results.label_ids
-    test_metrics = test_results.metrics
+        # Evaluate on test set
+        test_results = trainer.predict(test_dataset)
+        logits = test_results.predictions
+        label_ids = test_results.label_ids
+        test_metrics = test_results.metrics
 
-    preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+        preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
 
-    # Log metrics to wandb
-    wandb.log(test_metrics)
+        # Log metrics to wandb
+        wandb.log(test_metrics)
 
-    # Save metrics to JSON
-    metrics_json_path = os.path.join(output_dir, "metrics.json")
-    with open(metrics_json_path, 'w') as f:
-        json.dump(test_metrics, f)
+        # Save metrics to JSON
+        metrics_json_path = os.path.join(output_dir, "metrics.json")
+        with open(metrics_json_path, 'w') as f:
+            json.dump(test_metrics, f)
 
-    metric_df = pd.DataFrame(data = {"metric":test_metrics.keys(), "Score": test_metrics.values()})
-    report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
-    report_df['class'] = report_df.index
-    report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
-    _, cnf_matrix = cm(label_ids, preds, False)
-    cnf_matrix = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
+        metric_df = pd.DataFrame(data = {"metric":test_metrics.keys(), "Score": test_metrics.values()})
+        report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
+        report_df['class'] = report_df.index
+        report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
+        _, cnf_matrix = cm(label_ids, preds, False)
+        cnf_matrix = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
+        return metric_df, report_df, cnf_matrix, ""
+
+    except torch.cuda.OutOfMemoryError as e:
+        print(e)
+        message = "GPU out of memory. Try lowering the batch size or loading a smaller model!"
+        return None, None, None, message
 
 
 
-    return metric_df, report_df, cnf_matrix
+    
 
 
 

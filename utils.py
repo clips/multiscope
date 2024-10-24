@@ -118,7 +118,7 @@ class CustomDataset(Dataset):
         encoding = {key: val.squeeze(0) for key, val in encoding.items()}
         encoding['labels'] = torch.tensor(labels, dtype=torch.float)
         return encoding
-
+    
 
 # Data loading function
 def load_data(dataset_source, dataset_path):
@@ -162,12 +162,15 @@ def load_data(dataset_source, dataset_path):
 def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate):
     if not train_df.empty:
         if clf_method == "Fine-tune":
-            metric_df, report_df, cnf_matrix = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate)
-            return metric_df, report_df, cnf_matrix 
+            metric_df, report_df, cnf_matrix, error_message  = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate)
+            return metric_df, report_df, cnf_matrix, error_message
+        
         elif clf_method == "Prompt LLM":
             return f"Classifying data with {model_name} using Prompt LLM..."
+    
         elif clf_method == "Distance-based Classification":
             return f"Classifying data with {model_name} using Distance-based Classification..."
+
     else:
         return "No data loaded for training."
     
