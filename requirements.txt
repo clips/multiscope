@@ -6,3 +6,4 @@ plotly==5.24.1
 wandb==0.18.1
 gradio==4.44.0
 sentencepiece==0.2.0
+iterative-stratification==0.1.9
