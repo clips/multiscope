@@ -61,6 +61,10 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             train_df = gr.Dataframe(label="Training Dataset", visible=False)
             val_df = gr.Dataframe(label="Validation Dataset", visible=False)
             test_df = gr.Dataframe(label="Test Dataset", visible=False)
+
+        with gr.Row("Dataset Stats"):   
+            label_stats = gr.Dataframe(label="Label Stats", visible=False)
+            token_stats = gr.Dataframe(label="Token Stats", visible=False)
     
         with gr.Row("Graphs"):
             label_counts_plot = gr.Plot(label="Class Counts", visible=False)
@@ -89,13 +93,16 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
 
     # Load data function linking
     load_data_button.click( 
-        fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=True)),
+        fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), 
+                    gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)),
         inputs=None,
-        outputs=[dataset_statistics, train_df, val_df, test_df, label_counts_plot, correlation_matrix_plot]
+        outputs=[dataset_statistics, train_df, val_df, test_df, 
+                 label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
     ).then(
         fn=load_data,
         inputs=[dataset_source, dataset_path],
-        outputs=[train_df, val_df, test_df, label_counts_plot, correlation_matrix_plot] 
+        outputs=[train_df, val_df, test_df, label_stats, 
+                 token_stats, label_counts_plot, correlation_matrix_plot] 
     )
 
     # WandB integration

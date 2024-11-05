@@ -15,6 +15,13 @@ from itertools import combinations
 from finetune import finetune_transformer
 
 
+def get_token_counts(texts):
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    token_counts = [len(tokenizer.tokenize(text)) for text in texts]
+    return np.array(token_counts)
+
+
+
 def create_cooccurrence_matrix(column_with_lists):
     # Flatten the list of labels and get unique labels
     unique_labels = list(set(label for sublist in column_with_lists for label in sublist))
@@ -41,15 +48,46 @@ def create_cooccurrence_matrix(column_with_lists):
         colorbar=dict(title="Normalized Co-occurrence")
     ))
 
-    # Set axis labels
-    fig.update_layout(
-        xaxis_title="Label",
-        yaxis_title="Label"
-    )
-
     return fig
 
 
+
+def get_dataset_stats(dfs, splits):
+    token_stats = pd.DataFrame()
+    label_stats = pd.DataFrame()
+    
+    for split, df in zip(splits, dfs):
+        # label stats
+        max_cnt = max(df.labels.explode().value_counts())
+        min_cnt = min(df.labels.explode().value_counts())
+        mean_cnt = df.labels.apply(len).mean()
+        median_cnt = np.median(df.labels.apply(len).to_numpy())
+
+        label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
+                    'mean count': mean_cnt, 'median count': median_cnt}
+
+        # token stats
+        token_counts = get_token_counts(df.text.tolist())
+        max_tkn_cnt = max(token_counts)
+        min_tkn_cnt = min(token_counts)
+        mean_tkn_cnt = token_counts.mean()
+        median_tkn_cnt = np.median(token_counts)
+        q1_tkn_cnt = np.quantile(token_counts, .25)
+        q3_tkn_cnt = np.quantile(token_counts, .75)
+
+        token_stats[split] = {'min count': min_tkn_cnt, 'max count': max_tkn_cnt,
+                    'mean count': mean_tkn_cnt, 'median count': median_tkn_cnt, 
+                    'Q1': q1_tkn_cnt, 'Q3': q3_tkn_cnt}
+        
+    #create column for results, since Gradio does not display df idx
+    token_stats[' '] = token_stats.index
+    label_stats[' '] = label_stats.index
+
+    # re-order columns
+    token_stats = token_stats[[' '] + splits]
+    label_stats = label_stats[[' '] + splits]
+
+    return label_stats, token_stats
 
 
 
@@ -66,6 +104,8 @@ def load_huggingface_dataset(dataset_path, subset):
         return df
     else:
         raise gr.Error("Please enter the path to the dataset.")
+
+
 
 def load_local_dataset(dataset_path, subset):
     if dataset_path:
@@ -134,29 +174,40 @@ def load_data(dataset_source, dataset_path):
         test_df = load_local_dataset(dataset_path, subset="test")
 
     if not train_df.empty:
+        # create label counts plot
         label_counts = train_df['labels'].explode().value_counts().plot.bar(title='Class counts')
         label_counts.update_layout(xaxis_type='category')
 
+        # label co-occurrence matrix
         correlation_matrix = create_cooccurrence_matrix(train_df.labels)
+
+        #dataset stats
+        datasets = [train_df, val_df] if test_df.empty else [train_df, val_df, test_df]
+        splits = ['train', 'val'] if test_df.empty else ['train', 'val', 'test']
+        label_stats, token_stats = get_dataset_stats(datasets, splits)
 
         try:
             os.mkdir("./visualizations")
         except FileExistsError:
             pass
-
+        
+        # save figures
         label_counts.write_html("./visualizations/label_counts.html")
         correlation_matrix.write_html("./visualizations/cooc_matrix.html")
 
-        # return train_df, val_df, test_df, label_counts, correlation_matrix
         return (
             train_df,
             val_df, 
             test_df,
+            label_stats,
+            token_stats,
             gr.update(value=label_counts, visible=True),
             gr.update(value=correlation_matrix, visible=True)
         )
     else:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None, None
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None, None
+
+
 
 # Model training function
 def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate):
@@ -173,16 +224,17 @@ def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, l
 
     else:
         return "No data loaded for training."
-    
+
+
 
 def wandb_report(url):
     iframe = f'<iframe src={url} style="border:none;height:1024px;width:100%">'
     return gr.HTML(iframe, visible=False)
 
 
+
 def toggle_parameter_visibility(choice):
     if choice == 'Fine-tune':
         return gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
     else:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
-    
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False) 
