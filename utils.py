@@ -6,13 +6,15 @@ import torch
 import json
 import gradio as gr
 from datasets import load_dataset
-from torch.utils.data import DataLoader, Dataset
-from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+from torch.utils.data import Dataset
+from transformers import BertTokenizer, TrainerCallback
 from sklearn.preprocessing import MultiLabelBinarizer
 from datasets import load_dataset
 import plotly.graph_objects as go
 from itertools import combinations
 from finetune import finetune_transformer
+from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+from sklearn.preprocessing import MultiLabelBinarizer
 
 
 def get_token_counts(texts):
@@ -31,9 +33,9 @@ def create_cooccurrence_matrix(column_with_lists):
 
     # Count co-occurrences
     for sublist in column_with_lists:
-            for label1, label2 in combinations(sublist, 2):
-                co_occurrence_matrix.loc[label1, label2] += 1
-                co_occurrence_matrix.loc[label2, label1] += 1  # Ensure symmetry
+        for label1, label2 in combinations(sublist, 2):
+            co_occurrence_matrix.loc[label1, label2] += 1
+            co_occurrence_matrix.loc[label2, label1] += 1  # Ensure symmetry
             
     # Normalize the matrix by dividing each value by the maximum value in the matrix
     row_sums = co_occurrence_matrix.sum(axis=1)
@@ -57,14 +59,17 @@ def get_dataset_stats(dfs, splits):
     label_stats = pd.DataFrame()
     
     for split, df in zip(splits, dfs):
+        print(split)
+        print(df.columns)
         # label stats
-        max_cnt = max(df.labels.explode().value_counts())
-        min_cnt = min(df.labels.explode().value_counts())
-        mean_cnt = df.labels.apply(len).mean()
-        median_cnt = np.median(df.labels.apply(len).to_numpy())
+        if 'labels' in df.columns:
+            max_cnt = max(df.labels.explode().value_counts())
+            min_cnt = min(df.labels.explode().value_counts())
+            mean_cnt = df.labels.apply(len).mean()
+            median_cnt = np.median(df.labels.apply(len).to_numpy())
 
-        label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
-                    'mean count': mean_cnt, 'median count': median_cnt}
+            label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
+                        'mean count': mean_cnt, 'median count': median_cnt}
 
         # token stats
         token_counts = get_token_counts(df.text.tolist())
@@ -82,6 +87,9 @@ def get_dataset_stats(dfs, splits):
     #create column for results, since Gradio does not display df idx
     token_stats[' '] = token_stats.index
     label_stats[' '] = label_stats.index
+
+    print(label_stats.index)
+    print(label_stats)
 
     # re-order columns
     token_stats = token_stats[[' '] + splits]
@@ -112,9 +120,11 @@ def load_local_dataset(dataset_path, subset):
         try:
             if dataset_path.endswith('.csv'):
                 df = pd.read_csv(dataset_path)
+                df = df[df['subset']==subset]
             
             elif dataset_path.endswith('.xlsx'):
                 df = pd.read_excel(dataset_path)
+                df = df[df['subset']==subset]
 
             elif dataset_path.endswith('.json'):
                 with open(dataset_path, 'r', encoding='utf8') as f:
@@ -138,7 +148,20 @@ def load_local_dataset(dataset_path, subset):
     else:
         raise gr.Error("Please enter a path to the dataset.")
 
-    
+
+def split_data(train_df):
+    train_df = train_df.reset_index()
+    msss = MultilabelStratifiedShuffleSplit(n_splits=2, test_size=0.15, random_state=0)
+    mlb = MultiLabelBinarizer()
+
+    X = train_df['text'].values
+    y = mlb.fit_transform(train_df['labels'].values)
+
+    for train_index, val_index in msss.split(X, y):
+        val_df = train_df.loc[val_index]
+        new_train_df = train_df.loc[train_index]
+
+    return new_train_df, val_df    
 
 
 class CustomDataset(Dataset):
@@ -158,22 +181,43 @@ class CustomDataset(Dataset):
         encoding = {key: val.squeeze(0) for key, val in encoding.items()}
         encoding['labels'] = torch.tensor(labels, dtype=torch.float)
         return encoding
-    
+
 
 # Data loading function
-def load_data(dataset_source, dataset_path):
+def load_data(dataset_source, dataset_path, operations):
+    if not operations:
+        raise gr.Error("Please select 'Train', 'Test' or both. Please refresh the app to continue.")
 
     if dataset_source == "HuggingFace":
-        train_df = load_huggingface_dataset(dataset_path, subset="train")
-        val_df = load_huggingface_dataset(dataset_path, subset="val")
-        test_df = load_huggingface_dataset(dataset_path, subset="test")
+        if 'Train' in operations:
+            train_df = load_huggingface_dataset(dataset_path, subset="train")
+            if 'Split Training Data' in operations:
+                train_df, val_df = split_data(train_df)
+            else:
+                val_df = load_huggingface_dataset(dataset_path, subset="val")
+
+        if 'Test' in operations:
+            test_df = load_huggingface_dataset(dataset_path, subset="test")
 
     else:
-        train_df = load_local_dataset(dataset_path, subset="train")
-        val_df = load_local_dataset(dataset_path, subset="val")
-        test_df = load_local_dataset(dataset_path, subset="test")
+        if 'Train' in operations:
+            train_df = load_local_dataset(dataset_path, subset="train")
+            if 'Split Training Data' in operations:
+                train_df, val_df = split_data(train_df)
+            else:
+                val_df = load_local_dataset(dataset_path, subset="val")
 
-    if not train_df.empty:
+        if 'Test' in operations:
+            test_df = load_local_dataset(dataset_path, subset="test")
+
+        if 'Train' not in operations:
+            train_df = pd.DataFrame()
+        
+        if 'Test' not in operations:
+            test_df = pd.DataFrame()
+
+
+    if 'Train' in operations:
         # create label counts plot
         label_counts = train_df['labels'].explode().value_counts().plot.bar(title='Class counts')
         label_counts.update_layout(xaxis_type='category')
@@ -204,26 +248,36 @@ def load_data(dataset_source, dataset_path):
             gr.update(value=label_counts, visible=True),
             gr.update(value=correlation_matrix, visible=True)
         )
-    else:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None, None
+    
+    # only test 
+    elif 'Test' in operations:
+        label_stats, token_stats = get_dataset_stats([test_df], ['test'])
+        if 'labels' in test_df.columns:
+            label_counts = test_df['labels'].explode().value_counts().plot.bar(title='Class counts')
+            label_counts.update_layout(xaxis_type='category')
+            correlation_matrix = create_cooccurrence_matrix(test_df.labels)
+
+        return (gr.update(visible=False), # make train_df invisible in app
+                pd.DataFrame(), 
+                gr.update(value=test_df, visible=True), # make test df visible
+                label_stats if 'labels' in test_df.columns else pd.DataFrame(), 
+                token_stats, 
+                gr.update(value=label_counts if 'labels' in test_df.columns else pd.DataFrame() , visible=True if 'labels' in test_df.columns else False),
+                gr.update(value=correlation_matrix, visible=True if 'labels' in test_df.columns else False))
 
 
 
 # Model training function
-def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate):
-    if not train_df.empty:
-        if clf_method == "Fine-tune":
-            metric_df, report_df, cnf_matrix, error_message  = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate)
-            return metric_df, report_df, cnf_matrix, error_message
-        
-        elif clf_method == "Prompt LLM":
-            return f"Classifying data with {model_name} using Prompt LLM..."
+def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations):
+    if clf_method == "Fine-tune":
+        metric_df, report_df, cnf_matrix, error_message = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, n_epochs, operations)
+        return metric_df, report_df, cnf_matrix, error_message
     
-        elif clf_method == "Distance-based Classification":
-            return f"Classifying data with {model_name} using Distance-based Classification..."
+    elif clf_method == "Prompt LLM":
+        return f"Classifying data with {model_name} using Prompt LLM..."
 
-    else:
-        return "No data loaded for training."
+    elif clf_method == "Distance-based Classification":
+        return f"Classifying data with {model_name} using Distance-based Classification..."
 
 
 
