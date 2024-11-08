@@ -81,15 +81,17 @@ def toggle_classification_results(operations):
 # Gradio Interface
 with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     
-    gr.Markdown("# Multi-Scope: A Multi-Label Text Classification Dashboard")
+    gr.Markdown("# Multiscope: A Multi-Label Text Classification Dashboard")
+
 
     # Dataset loading
     with gr.Row(variant='panel'):
-        dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source:", value="Local")
-        dataset_path = gr.Textbox(label="Dataset Path:")
-        operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], 
-                                 value=["Train", "Test"], 
-                                 label="Data Operations")
+        dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source:", value="Local", 
+                                  info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
+        dataset_path = gr.Textbox(label="Dataset Path:", 
+                                  info="Enter the path to your local dataset or HuggingFace dataset.")
+        operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", 
+                                      info="Select the operations to be done.")
     
     with gr.Row():
         load_data_button = gr.Button("Load Data")
@@ -160,6 +162,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
 
     loader = gr.Markdown(value="Training model...", visible=False)
 
+    # classification results
     with gr.Accordion("Classification Results", open=True, visible=False) as results_row:
         with gr.Row():
             metric_df = gr.Dataframe(label="Results", visible=True)
@@ -168,18 +171,87 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         with gr.Row():
             cnf_matrix = gr.Plot(label="Confusion Matrix", visible=True)
 
+    # Info
+    with gr.Tab("User Guidelines"):
+         gr.Markdown("""
+        ### General
+        Multiscope provides a complete pipeline for multi-label text classification by showing dataset statistics and insights into the label set, in addition to a
+        general framework to fine-tune and evaluate state-of-the-art transformer models.
+                     
+        ### Dataset Selection
+        Multiscope allows for models to be trained on either a local dataset or a dataset available on the HuggingFace hub. Select the dataset source accordingly.
+        Local datasets can either be .csv, .xlsx or .json. 
+                     
+        ##### XLSX and CSV files              
+        Ensure that the following columns are present in the CSV or Excel files: "text" (contains texts as strings), 
+        "labels" (contains *lists* of label names) and "subset" (can either be "train", "val" or "test"). The test set is not required to contain labels. In this case, Multiscope 
+        only performs inference and does not calculate metrics.
+        
+        ##### JSON files
+        JSON files should adhere to the following structure:
+                     
+                {
+                    data:{ 
+                            'train':    [{'id': ID_1, 'text': TEXT_1, 'labels': [LABELS]}, ..., {'id': ID_N, 'text': TEXT_N, 'labels': [LABELS]} ] 
+                            'val':      [{'id': ID_1, 'text': TEXT_1, 'labels': [LABELS]}, ..., {'id': ID_N, 'text': TEXT_N, 'labels': [LABELS]} ]  (if present) 
+                            'test':     [{'id': ID_1, 'text': TEXT_1, 'labels': [LABELS]}, ..., {'id': ID_N, 'text': TEXT_N, 'labels': [LABELS]} ]  (remove 'labels' if not present in test set)
+                        } 
+                }            
+        
+        ### Data Stratification
+        Multiscope also allows you to create a stratified validation split of the training data using the method described in (). For more information about this data
+        stratification method, consult the original paper.
+
+                     
+        ### Model Selection
+        Multiscope is built around the *transformers* library, developed by HuggingFace. This means that models that are published on the HuggingFace platform can be used in this dashboard. 
+        Some recommended (English) models are the following:
+        * BERT (Devlin et al. 2018): ```bert-base-cased```, ```bert-large-cased```
+        * RoBERTa (Liu et al. 2019): ```roberta-base```, ```roberta-large```
+        * DistilBERT (Sanh et al. 2019): ```distilbert-base-cased```
+        * DeBERTa (He et al. 2020): ```microsoft/deberta-base```
+                     
+        Recommended multi-lingual models:
+        * XLM-RoBERTa (Conneau et al. 2019): ```xlm-roberta-base```, ```xlm-roberta-large```
+                     
+        Recommended language-specific models:
+        * BERTje (Dutch) (de Vries et al. 2019): ```GroNLP/bert-base-dutch-cased```
+        * CamemBERT (French) (Martin et al. 2020):```almanach/camembert-base```
+        * BERT (German): ```google-bert/bert-base-german-cased```
+
+        Recommended domain-specific models:
+        * TwHIN-BERT (Twitter; multilingual) (Zhang et al. 2022): ```Twitter/twhin-bert-base```
+        * Sci-BERT (scientific texts) (Beltagy et al. 2019): ```allenai/scibert_scivocab_uncased```
+        * BioBERT (biomedical texts) (Lee et al. 2019): ```dmis-lab/biobert-v1.1```
+        * FinBERT (financial texts) (Araci 2019): ```ProsusAI/finbert```
+                     """)
+         
+    with gr.Tab("About"):
+        gr.Markdown("""
+        ### Project
+        Multiscope is a multi-label text classification dashboard that was developed by [CLiPS](https://www.uantwerpen.be/en/research-groups/clips/) ([University of Antwerp](https://www.uantwerpen.be/en/)) during the [CLARIAH-VL](https://clariahvl.hypotheses.org/) project.
+        The code is available here: https://github.com/clips/multiscope.
+        
+        ### Contact 
+        If you have questions, please send them to [Jens Van Nooten](mailto:jens.vannooten@uantwerpen.be) or [Walter Daelemans](mailto:walter.daelemans@uantwerpen.be).
+
+                        """)
+
+    
+
     # display errors 
     error_output = gr.Markdown(value="", visible=False)
 
+    # train model or inference
     train_model_button.click(
         fn=lambda: gr.update(interactive=False), # disable button after clicking 
         inputs=None, 
         outputs=train_model_button
-    # ).then(
-    #     fn= lambda: (gr.update(visible=True), gr.update(visible=True)),
-    #     inputs=None,
-    #     outputs=[report_row, results_row] 
-     ).then(
+    ).then(
+        fn=lambda: gr.update(value="Training model..."),  
+        inputs=None, 
+        outputs=loader
+    ).then(
         fn= toggle_classification_results,
         inputs=operations,
         outputs=[report_row, results_row, loader] 
@@ -195,7 +267,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         inputs=None, 
         outputs=train_model_button
     ).then(
-        fn=lambda: gr.update(value="Finished training!"),  # enable button after model is done training
+        fn=lambda: gr.update(value="Finished training!"), 
         inputs=None, 
         outputs=loader
     )
