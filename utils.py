@@ -131,6 +131,7 @@ def load_local_dataset(dataset_path, subset):
                     data = json.load(f)
                     if 'data' in data:
                         if subset in data['data']:
+                            print(data['data'][subset][0])
                             df = pd.DataFrame(data['data'][subset])
                         else:
                             raise gr.Error(f"Ensure that the subset names are correct! Found {list(data.keys())}, but expected ['train', 'val', 'test']")
@@ -143,7 +144,7 @@ def load_local_dataset(dataset_path, subset):
         except FileNotFoundError as e:
             raise gr.Error("Local file not found!")
         
-        return df.sample(n=50, random_state=42)
+        return df
         
     else:
         raise gr.Error("Please enter a path to the dataset.")
