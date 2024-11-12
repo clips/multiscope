@@ -2,7 +2,8 @@ import gradio as gr
 import pandas as pd
 from datasets import load_dataset
 import plotly.graph_objects as go
-from utils import create_cooccurrence_matrix, load_data, train_model, wandb_report, toggle_parameter_visibility, load_huggingface_dataset, load_local_dataset
+from utils import (create_cooccurrence_matrix, load_data, train_model, wandb_report, toggle_parameter_visibility, load_huggingface_dataset, load_local_dataset,
+                   show_error, update_button_text, toggle_hyperparameters, toggle_data_display, toggle_classification_results)
 from finetune import finetune_transformer
 import torch
 import wandb
@@ -10,6 +11,7 @@ import wandb
 pd.options.plotting.backend = "plotly"
 
 # CSS THEMES___________________________________________________________________________________________________
+
 css = """
 h1 {
     display: block;
@@ -35,143 +37,84 @@ theme = gr.themes.Soft(
     block_label_background_fill='*primary_50',
 )
 
-def show_error(msg):
-    if msg:
-        print('triggered')
-        raise(gr.Error(msg))
-
-
-def update_button_text(operations):
-    if "Train" in operations and "Test" in operations:
-        return "Train Model and Predict Test Set"
-    elif "Train" in operations:
-        return "Train Model"
-    elif "Test" in operations:
-        return "Predict Test Set"
-    else:
-        return "Run"
-
-def toggle_hyperparameters(operations):
-    if "Test" in operations and "Train" not in operations:
-        return gr.update(value='N/A', interactive=False), gr.update(value='N/A', interactive=False)
-    else:
-        return gr.update(value=5, interactive=True), gr.update(value=5e-5, interactive=True)
-    
-def toggle_data_display(operations):
-    if "Test" in operations and "Train" not in operations:
-        return (gr.update(label="Test Data"), 
-                gr.update(visible=False),  # Hide label stats
-                gr.update(visible=False),  # Hide class counts plot
-                gr.update(visible=False))  # Hide co-occurrence matrix
-    else:
-        return (gr.update(label="Training Dataset"),
-                gr.update(visible=True),
-                gr.update(visible=True),
-                gr.update(visible=True))
-
-def toggle_classification_results(operations):
-    if "Train" in operations and "Test" not in operations:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
-    else:
-        return gr.update(visible=True), gr.update(visible=True), gr.update(visible=False)
-
 
 #APP INTERFACE______________________________________________________________________________________________
 
 # Gradio Interface
 with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     
+    # Main Interface
     gr.Markdown("# Multiscope: A Multi-Label Text Classification Dashboard")
 
-
-    # Dataset loading
-    with gr.Row(variant='panel'):
-        dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source:", value="Local", 
-                                  info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
-        dataset_path = gr.Textbox(label="Dataset Path:", 
-                                  info="Enter the path to your local dataset or HuggingFace dataset.")
-        operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", 
-                                      info="Select the operations to be done.")
-    
-    with gr.Row():
-        load_data_button = gr.Button("Load Data")
-
-    # Data statistics
-    with gr.Accordion("Data Statistics", open=True, visible=False) as dataset_statistics:
-        with gr.Row("Dataset Rows"):
-            train_df = gr.Dataframe(label="Training Dataset", visible=False)
-            val_df = gr.Dataframe(label="Validation Dataset", visible=False)
-            test_df = gr.Dataframe(label="Test Dataset", visible=False)
-
-        with gr.Row("Dataset Stats"):   
-            label_stats = gr.Dataframe(label="Label Stats", visible=False)
-            token_stats = gr.Dataframe(label="Token Stats", visible=False)
-    
-        with gr.Row("Graphs"):
-            label_counts_plot = gr.Plot(label="Class Counts", visible=False)
-            correlation_matrix_plot = gr.Plot(label="Co-occurrence Matrix", visible=False)
-
-    # Classification
-    with gr.Row(variant='panel'):
-        clf_method = gr.Radio(["Fine-tune", "Prompt LLM"], label="Select Classification Method", value="Fine-tune")
-        model_name = gr.Textbox(label="Model name:", value='roberta-base', interactive=True)
-        batch_size = gr.Textbox(label="Batch size:", value=8, interactive=True)
-        n_epochs = gr.Textbox(label="Number of Training Epochs:", value=5, interactive=True)
-        learning_rate = gr.Textbox(label="Learning rate:", value=5e-5, interactive=True)
-        # to-do: implement early stopping 
-        #to-do: custom losses
-
-    # change visibility of hyperparameters based on clf method
-    clf_method.change(
-        toggle_parameter_visibility,
-        inputs=[clf_method],
-        outputs=[batch_size, n_epochs, learning_rate] 
-    )
-
-    with gr.Row():
-        train_model_button = gr.Button("Run")
-
-    # Load data function linking
-    load_data_button.click( 
-        fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), 
-                    gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)),
-        inputs=None,
-        outputs=[dataset_statistics, train_df, val_df, test_df, 
-                 label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
-    ).then(
-        fn=load_data,
-        inputs=[dataset_source, dataset_path, operations],
-        outputs=[train_df, val_df, test_df, label_stats, 
-                 token_stats, label_counts_plot, correlation_matrix_plot] 
-    )
-
-    # WandB integration
-    demo.integrate(wandb=wandb)
-    wandb.init(
-        project="multiscope-demo",
-        name='test',
-        tags=["baseline"],
-        group="bert",
-    )
-    
-    # wandb integration
-    url = wandb.run.get_url()
-    with gr.Accordion("Weights & Biases Report:", open=True, visible=False) as report_row:
-        iframe = f'<iframe src={url} style="border:none;height:1024px;width:100%">'
-        report = gr.HTML(iframe, visible=True)
-
-    loader = gr.Markdown(value="Training model...", visible=False)
-
-    # classification results
-    with gr.Accordion("Classification Results", open=True, visible=False) as results_row:
+    with gr.Tab("Pipeline"):
+        # Dataset loading
+        with gr.Row(variant='panel'):
+            dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source:", value="Local", info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
+            dataset_path = gr.Textbox(label="Dataset Path:",  info="Enter the path to your local dataset or HuggingFace dataset.")
+            operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", info="Select the operations to be done.")
+        
         with gr.Row():
-            metric_df = gr.Dataframe(label="Results", visible=True)
-            report_df = gr.Dataframe(label="Classification Report", visible=True)
+            load_data_button = gr.Button("Load Data")
+
+        # Data statistics
+        with gr.Accordion("Data Statistics", open=True, visible=False) as dataset_statistics:
+            with gr.Row("Dataset Rows"):
+                train_df = gr.Dataframe(label="Training Dataset", visible=False)
+                val_df = gr.Dataframe(label="Validation Dataset", visible=False)
+                test_df = gr.Dataframe(label="Test Dataset", visible=False)
+
+            with gr.Row("Dataset Stats"):   
+                label_stats = gr.Dataframe(label="Label Stats", visible=False)
+                token_stats = gr.Dataframe(label="Token Stats", visible=False)
+        
+            with gr.Row("Graphs"):
+                label_counts_plot = gr.Plot(label="Class Counts", visible=False)
+                correlation_matrix_plot = gr.Plot(label="Co-occurrence Matrix", visible=False)
+
+        # Classification
+        with gr.Row(variant='panel'):
+            clf_method = gr.Radio(["Fine-tune", "Prompt LLM"], label="Select Classification Method", value="Fine-tune")
+            model_name = gr.Textbox(label="Model name:", value='roberta-base', interactive=True)
+            batch_size = gr.Textbox(label="Batch size:", value=8, interactive=True)
+            n_epochs = gr.Textbox(label="Number of Training Epochs:", value=5, interactive=True)
+            learning_rate = gr.Textbox(label="Learning rate:", value=5e-5, interactive=True)
+            # to-do: implement early stopping 
 
         with gr.Row():
-            cnf_matrix = gr.Plot(label="Confusion Matrix", visible=True)
+            train_model_button = gr.Button("Run")
 
-    # Info
+        # WandB integration
+        demo.integrate(wandb=wandb)
+
+        wandb.init(
+            project="multiscope-demo",
+            name='test',
+            tags=["baseline"],
+            group="bert",
+        )
+        
+        url = wandb.run.get_url()
+
+        with gr.Accordion("Weights & Biases Report:", open=True, visible=False) as report_row:
+            iframe = f'<iframe src={url} style="border:none;height:1024px;width:100%">'
+            report = gr.HTML(iframe, visible=True)
+
+        # displays progress
+        loader = gr.Markdown(value="Training model...", visible=False)
+
+
+        # classification results
+        with gr.Accordion("Classification Results", open=True, visible=False) as results_row:
+            with gr.Row():
+                metric_df = gr.Dataframe(label="Results", visible=True)
+                report_df = gr.Dataframe(label="Classification Report", visible=True)
+
+            with gr.Row():
+                cnf_matrix = gr.Plot(label="Confusion Matrix", visible=True)
+
+
+# DOCUMENTATION_______________________________________________________________________________________________________________________________
+
     with gr.Tab("User Guidelines"):
          gr.Markdown("""
         ### General
@@ -202,28 +145,41 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         Multiscope also allows you to create a stratified validation split of the training data using the method described in (). For more information about this data
         stratification method, consult the original paper.
 
-                     
         ### Model Selection
-        Multiscope is built around the *transformers* library, developed by HuggingFace. This means that models that are published on the HuggingFace platform can be used in this dashboard. 
-        Some recommended (English) models are the following:
-        * BERT (Devlin et al. 2018): ```bert-base-cased```, ```bert-large-cased```
-        * RoBERTa (Liu et al. 2019): ```roberta-base```, ```roberta-large```
-        * DistilBERT (Sanh et al. 2019): ```distilbert-base-cased```
-        * DeBERTa (He et al. 2020): ```microsoft/deberta-base```
+        Multiscope is built around the *transformers* library, developed by HuggingFace. This means that models that are published on the HuggingFace platform can be used in this dashboard. Below
+        are some recommended models for specific use cases. Copy/paste the model names in the *Model Name* text box. 
+        Recommended (English) models:
+        * BERT: ```bert-base-cased```, ```bert-large-cased```
+        * RoBERTa: ```roberta-base```, ```roberta-large```
+        * DistilBERT: ```distilbert-base-cased```
+        * DeBERTa: ```microsoft/deberta-base```
                      
         Recommended multi-lingual models:
-        * XLM-RoBERTa (Conneau et al. 2019): ```xlm-roberta-base```, ```xlm-roberta-large```
+        * XLM-RoBERTa: ```xlm-roberta-base```, ```xlm-roberta-large```
                      
         Recommended language-specific models:
-        * BERTje (Dutch) (de Vries et al. 2019): ```GroNLP/bert-base-dutch-cased```
-        * CamemBERT (French) (Martin et al. 2020):```almanach/camembert-base```
+        * BERTje (Dutch): ```GroNLP/bert-base-dutch-cased```
+        * CamemBERT (French):```almanach/camembert-base```
         * BERT (German): ```google-bert/bert-base-german-cased```
 
         Recommended domain-specific models:
-        * TwHIN-BERT (Twitter; multilingual) (Zhang et al. 2022): ```Twitter/twhin-bert-base```
-        * Sci-BERT (scientific texts) (Beltagy et al. 2019): ```allenai/scibert_scivocab_uncased```
-        * BioBERT (biomedical texts) (Lee et al. 2019): ```dmis-lab/biobert-v1.1```
-        * FinBERT (financial texts) (Araci 2019): ```ProsusAI/finbert```
+        * TwHIN-BERT (Twitter; multilingual): ```Twitter/twhin-bert-base```
+        * Sci-BERT (scientific texts): ```allenai/scibert_scivocab_uncased```
+        * BioBERT (biomedical texts): ```dmis-lab/biobert-v1.1```
+        * FinBERT (financial texts): ```ProsusAI/finbert```
+                     
+        ### Model Evaluation
+        The fine-tuned model is evaluated on a validation set during fine-tuning and, if specified, on a held-out (annotated) test set. For this, the standard evaluation metrics
+        are employed. These include precision, recall, macro- and micro-averaged F1-score, Exact Match Ratio and Hamming Loss.
+                     
+        | Metric    | Explanation                                               | 
+        |-----------|-----------------------------------------------------------|
+        | Precision | The fraction of relevant instances of all retrieved instances |
+        | Recall    | The fraction of all relevant instances of all retrieved instances|
+        | F1-Score  | The harmonic mean of precision and recall. Macro-averaged F1 is the average of per-class F1-scores. Micro-averaged F1 scores is the globally averaged F1 across instances. |
+        | Exact Match Ratio | The fraction of instances where all label sets are predicted correctly. |
+        | Hamming Loss | The fraction of incorrectly predicted labels to all correct labels, averaged across instances. |   
+        
                      """)
          
     with gr.Tab("About"):
@@ -237,10 +193,30 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
 
                         """)
 
+    with gr.Row():
+        gr.Markdown("""<center><img src="https://platformdh.uantwerpen.be/wp-content/uploads/2019/03/clariah_def.png" alt="Image" width="200"/></center>""")
+        gr.Markdown("""<center><img src="https://thomasmore.be/sites/default/files/2022-11/UA-hor-1-nl-rgb.jpg" alt="Image" width="175"/></center>""")
+
+
     
+# CONTENT VISIBILITY UPDATES___________________________________________________________________________________________________________
 
     # display errors 
     error_output = gr.Markdown(value="", visible=False)
+
+    # Load data function linking
+    load_data_button.click( 
+        fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), 
+                    gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)),
+        inputs=None,
+        outputs=[dataset_statistics, train_df, val_df, test_df, 
+                 label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
+    ).then(
+        fn=load_data,
+        inputs=[dataset_source, dataset_path, operations],
+        outputs=[train_df, val_df, test_df, label_stats, 
+                 token_stats, label_counts_plot, correlation_matrix_plot] 
+    )
 
     # train model or inference
     train_model_button.click(
@@ -261,13 +237,13 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=[metric_df, report_df, cnf_matrix, error_output]
     ).then(
         fn=show_error,
-        inputs=error_output,  # Pass the error message to this function
+        inputs=error_output,  # Pass the error message to this function and raise error
     ).then(
         fn=lambda: gr.update(interactive=True),  # enable button after model is done training
         inputs=None, 
         outputs=train_model_button
     ).then(
-        fn=lambda: gr.update(value="Finished training!"), 
+        fn=lambda: gr.update(value="Finished training!"), # update loader 
         inputs=None, 
         outputs=loader
     )
@@ -291,6 +267,12 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=[train_df, label_stats, label_counts_plot, correlation_matrix_plot]
     )
 
+    # change visibility of hyperparameters based on clf method
+    clf_method.change(
+        toggle_parameter_visibility,
+        inputs=[clf_method],
+        outputs=[batch_size, n_epochs, learning_rate] 
+    )
 
 
 # Launch Gradio app

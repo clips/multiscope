@@ -184,7 +184,6 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
         with open(os.path.join(output_dir, 'classes.json'), 'w', encoding='utf8') as f:
             json.dump(list(mlb.classes_), f)
 
-
         # load model   
         try:
             model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels, problem_type="multi_label_classification")

@@ -15,6 +15,7 @@ from itertools import combinations
 from finetune import finetune_transformer
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from sklearn.preprocessing import MultiLabelBinarizer
+from ast import literal_eval
 
 
 def get_token_counts(texts):
@@ -120,11 +121,14 @@ def load_local_dataset(dataset_path, subset):
         try:
             if dataset_path.endswith('.csv'):
                 df = pd.read_csv(dataset_path)
+                df.labels = df.labels.apply(literal_eval)
                 df = df[df['subset']==subset]
             
             elif dataset_path.endswith('.xlsx'):
                 df = pd.read_excel(dataset_path)
+                df.labels = df.labels.apply(literal_eval)
                 df = df[df['subset']==subset]
+                
 
             elif dataset_path.endswith('.json'):
                 with open(dataset_path, 'r', encoding='utf8') as f:
@@ -281,15 +285,53 @@ def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, l
         return f"Classifying data with {model_name} using Distance-based Classification..."
 
 
+# Gradio functions
 
 def wandb_report(url):
     iframe = f'<iframe src={url} style="border:none;height:1024px;width:100%">'
     return gr.HTML(iframe, visible=False)
-
-
 
 def toggle_parameter_visibility(choice):
     if choice == 'Fine-tune':
         return gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
     else:
         return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False) 
+    
+def show_error(msg):
+    if msg:
+        print('triggered')
+        raise(gr.Error(msg))
+
+def update_button_text(operations):
+    if "Train" in operations and "Test" in operations:
+        return "Train Model and Predict Test Set"
+    elif "Train" in operations:
+        return "Train Model"
+    elif "Test" in operations:
+        return "Predict Test Set"
+    else:
+        return "Run"
+
+def toggle_hyperparameters(operations):
+    if "Test" in operations and "Train" not in operations:
+        return gr.update(value='N/A', interactive=False), gr.update(value='N/A', interactive=False)
+    else:
+        return gr.update(value=5, interactive=True), gr.update(value=5e-5, interactive=True)
+    
+def toggle_data_display(operations):
+    if "Test" in operations and "Train" not in operations:
+        return (gr.update(label="Test Data"), 
+                gr.update(visible=False),  # Hide label stats
+                gr.update(visible=False),  # Hide class counts plot
+                gr.update(visible=False))  # Hide co-occurrence matrix
+    else:
+        return (gr.update(label="Training Dataset"),
+                gr.update(visible=True),
+                gr.update(visible=True),
+                gr.update(visible=True))
+
+def toggle_classification_results(operations):
+    if "Train" in operations and "Test" not in operations:
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
+    else:
+        return gr.update(visible=True), gr.update(visible=True), gr.update(visible=False)
