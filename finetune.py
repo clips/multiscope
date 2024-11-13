@@ -261,9 +261,12 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                         json.dump(test_metrics, f)
 
                     metric_df = pd.DataFrame(data = {"metric":test_metrics.keys(), "Score": test_metrics.values()})
+                    metric_df['Score'] = metric_df['Score'].apply(lambda x: round(x, 5))
+
                     report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
                     report_df['class'] = report_df.index
                     report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
+                    report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
                     _, cnf_matrix = cm(label_ids, preds, False)
                     cnf_matrix = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
 
@@ -338,9 +341,12 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
 
             # Prepare metrics DataFrame and classification report
             metric_df = pd.DataFrame(data={"metric": test_metrics.keys(), "Score": test_metrics.values()})
+            metric_df['Score'] = metric_df['Score'].apply(lambda x: round(x, 5))
+            
             report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
             report_df['class'] = report_df.index
             report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
+            report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
 
             # Generate the confusion matrix heatmap
             _, cnf_matrix = cm(label_ids, preds, False)
