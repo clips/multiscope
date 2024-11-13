@@ -25,7 +25,7 @@ def get_token_counts(texts):
 
 
 
-def create_cooccurrence_matrix(column_with_lists):
+def create_cooccurrence_matrix(column_with_lists, cmap='OrRd'):
     # Flatten the list of labels and get unique labels
     unique_labels = list(set(label for sublist in column_with_lists for label in sublist))
 
@@ -47,7 +47,7 @@ def create_cooccurrence_matrix(column_with_lists):
         z=normalized_matrix.to_numpy(),
         x=normalized_matrix.columns,
         y=normalized_matrix.index,
-        colorscale='Viridis',
+        colorscale=cmap,
         colorbar=dict(title="Normalized Co-occurrence")
     ))
 
@@ -60,8 +60,6 @@ def get_dataset_stats(dfs, splits):
     label_stats = pd.DataFrame()
     
     for split, df in zip(splits, dfs):
-        print(split)
-        print(df.columns)
         # label stats
         if 'labels' in df.columns:
             max_cnt = max(df.labels.explode().value_counts())
@@ -146,7 +144,7 @@ def load_local_dataset(dataset_path, subset):
                 raise gr.Error("Please load a .csv, .xlsx or .json file!")
 
         except FileNotFoundError as e:
-            raise gr.Error("Local file not found!")
+            raise gr.Error(f"Local file with path '{dataset_path}' not found!")
         
         return df
         
