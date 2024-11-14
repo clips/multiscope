@@ -13,6 +13,8 @@ from mlcm import cm
 import numpy as np
 import plotly.graph_objects as go
 import safetensors
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 
 def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', title='Confusion Matrix', save_path=None, labels=None, annotate=True):
@@ -59,7 +61,7 @@ def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', title='Confus
     fig.update_layout(
         title=title,
         xaxis=dict(title='Predicted', tickmode='array', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NPL']),
-        yaxis=dict(title='Truth', tickmode='array', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NPL']),
+        yaxis=dict(title='Truth', tickmode='array', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NTL']),
         autosize=False,
         width=800,
         height=600
@@ -67,10 +69,11 @@ def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', title='Confus
 
     return fig
 
+
 class CustomDataset(Dataset):
     def __init__(self, texts, labels, tokenizer, max_length=512):
         self.texts = texts
-        self.labels = labels if labels.any() else np.array()
+        self.labels = labels
         self.tokenizer = tokenizer
         self.max_length = max_length
 
@@ -80,11 +83,12 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         text = self.texts[idx]
         encoding = self.tokenizer(text, padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt')
-        if self.labels.any():
+        encoding = {key: val.squeeze(0) for key, val in encoding.items()}
+        if self.labels is not None:
             labels = self.labels[idx]
-            encoding = {key: val.squeeze(0) for key, val in encoding.items()}
             encoding['labels'] = torch.tensor(labels, dtype=torch.float)
         return encoding
+
 
 class SaveTokenizerCallback(TrainerCallback):
     def __init__(self, tokenizer, save_path):
@@ -100,11 +104,12 @@ class SaveTokenizerCallback(TrainerCallback):
 
 def prepare_data(df, mlb, tokenizer, no_labels, max_length=512):
     texts = df.text
+    labels = None
+
     if not no_labels:
         labels = mlb.transform(df.labels)
-        dataset = CustomDataset(texts, labels, tokenizer, max_length=max_length)
-    else:
-        dataset = CustomDataset(texts, np.array(), tokenizer, max_length=max_length)
+        
+    dataset = CustomDataset(texts, labels=labels, tokenizer=tokenizer, max_length=max_length)
 
     return dataset
 
@@ -141,14 +146,38 @@ def compute_metrics(pred):
     return metrics
  
 
+
+def predict(test_dataset, model, batch_size):
+    print(batch_size)
+    print(type(batch_size))
+    predictions = []
+    loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    with torch.no_grad():
+        for batch in tqdm(loader):
+            inputs = {k: v.to(model.device) for k, v in batch.items()}  # Exclude 'labels' if not present
+            outputs = model(**inputs)
+            logits = outputs.logits.cpu()
+            preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+            predictions.append(preds.tolist())
+
+    return predictions
+
+
+
 def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, n_epochs, operations, output_dir="./results", save_best_metric="macro_f1"):
-    print(operations)
+    try:
+        os.mkdir(output_dir)
+    except FileExistsError:
+        pass
+
     # Initialiaz MLB
     mlb = MultiLabelBinarizer()
 
+    batch_size = int(batch_size)
+
     # Parse operations to be performed
     if 'Train' in operations and 'Test' in operations:
-        print("Training and testing")
         if 'labels' in test_df.columns:
             only_predict = False
             train_labels, val_labels, test_labels = train_df.labels.tolist(), val_df.labels.tolist(), test_df.labels.tolist() 
@@ -161,13 +190,11 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
         num_labels = len(mlb.classes_)
 
     elif 'Train' in operations and 'Test' not in operations:
-        print("Only training")
         train_labels, val_labels = train_df.labels.tolist(), val_df.labels.tolist()
         mlb.fit(train_labels + val_labels)
         num_labels = len(mlb.classes_)
 
     else:
-        print("Only testing")
         if 'labels' in test_df.columns:
             only_predict = False
             test_labels = test_df.labels.tolist() 
@@ -204,8 +231,8 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             eval_strategy="epoch",
             save_strategy="epoch",
             logging_dir='./logs',
-            per_device_train_batch_size=int(batch_size),
-            per_device_eval_batch_size=int(batch_size),
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
             num_train_epochs=int(n_epochs),
             load_best_model_at_end=True,
             metric_for_best_model=save_best_metric,
@@ -235,14 +262,15 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                 if os.path.exists(best_model_path):
                     model = AutoModelForSequenceClassification.from_pretrained(output_dir)
 
-                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True if only_predict else False)
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=only_predict)
 
                 if only_predict:
-                    trainer = Trainer(model=model)
                     test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
-                    logits = test_results.predictions
-                    preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+                    preds = predict(test_dataset, model, batch_size)
 
+                    with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                        json.dump(preds, f)
+            
                     return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
 
                 else:
@@ -267,24 +295,33 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                     report_df['class'] = report_df.index
                     report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
                     report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
-                    _, cnf_matrix = cm(label_ids, preds, False)
-                    cnf_matrix = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
 
-                    return metric_df, report_df, cnf_matrix, ""
+                    # get confusion matrix and save
+                    _, cnf_matrix = cm(label_ids, preds, False)
+                    cnf_matrix_fig = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
+                    cnf_matrix_fig.write_html("./visualizations/confusion_matrix.html")
+
+                    # save predictions
+                    with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                        json.dump(preds.tolist(), f)
+
+                    # save metric df and classification report
+                    metric_df.to_json('./results/test_results.json')
+                    report_df.to_json('./results/classification_report.json')
+
+                    return metric_df, report_df, cnf_matrix_fig, ""
                 
             else:
                 return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
             
         # Catch potential OOM error
         except torch.cuda.OutOfMemoryError as e:
-            print(e)
             message = "GPU out of memory. Try lowering the batch size or loading a smaller model!"
             return None, None, None, message
         
 
     # Only inference on test set using trained model
     elif 'Test' in operations and 'Train' not in operations:
-
         tokenizer = AutoTokenizer.from_pretrained(model_name) # model_name = fine-tuned local model in this case
 
         try:
@@ -293,9 +330,20 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             raise gr.Error(f"Model could not be loaded from '{model_name}'. Please ensure the model is available.")
 
         # Prepare the test dataset
+        if only_predict:
+            print('predicting')
+            test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
+            preds = predict(test_dataset, model, batch_size)
 
-        if not only_predict:
+            # save predictions
+            with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                json.dump(preds, f)
 
+            return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
+
+
+        # only make predictions
+        else:
             device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
             model.to(device)
 
@@ -310,31 +358,19 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                 model=model,
                 compute_metrics=compute_metrics
              )
-        
+            
+            # Predict test set
+            test_results = trainer.predict(test_dataset)
+            logits = test_results.predictions
+            preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+            preds = [p.tolist() for p in preds]   
 
-        else:  
-            trainer = Trainer(
-                model=model,
-             )
-            test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
-        
-        # Predict test set
-        test_results = trainer.predict(test_dataset)
-        logits = test_results.predictions
+            label_ids = test_results.label_ids
+            test_metrics = test_results.metrics
 
-        # Convert logits to binary predictions and save predictions
-        preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
-        predictions_json_path = os.path.join(output_dir, f"predictions.json")
-        with open(predictions_json_path, 'w') as f:
-            json.dump(preds.tolist(), f)
-
-        label_ids = test_results.label_ids
-        test_metrics = test_results.metrics
-
-        # if labels are available, calculate metrics
-        if not only_predict:
             # Log metrics and save them to JSON
             wandb.log(test_metrics)
+
             metrics_json_path = os.path.join(output_dir, "test_metrics.json")
             with open(metrics_json_path, 'w') as f:
                 json.dump(test_metrics, f)
@@ -348,19 +384,17 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
             report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
 
-            # Generate the confusion matrix heatmap
+            # Generate the confusion matrix heatmap and save
             _, cnf_matrix = cm(label_ids, preds, False)
             cnf_matrix_fig = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
+            cnf_matrix_fig.write_html("./visualizations/confusion_matrix.html")
+
+            # save predictions
+            with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                json.dump(preds, f)
+
+            # save metric df and classification report
+            metric_df.to_json('./results/test_results.json')
+            report_df.to_json('./results/classification_report.json')
 
             return metric_df, report_df, cnf_matrix_fig, ""
-        
-        else:
-            return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
-
-
-
-
-    
-
-
-

@@ -119,7 +119,13 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
          gr.Markdown("""
         ### General
         Multiscope provides a complete pipeline for multi-label text classification by showing dataset statistics and insights into the label set, in addition to a
-        general framework to fine-tune and evaluate state-of-the-art transformer models.
+        general framework to fine-tune and evaluate state-of-the-art transformer models. The general workflow of this dashboard is the following:
+        1. Input the path to a remote or local dataset and load the data.
+        2. Select the operations to be performed. Select 'Train' if you want to fine-tune a model on the training data and 'Test' if you want to make predictions with the fine-tuned model on a test set. In the cases where only 'Test' is selected, ensure that you load a valid fine-tuned model!
+        3. Input the model that will be used for fine-tuning. Consult the HuggingFace website or the list below for multiple options.
+        4. Input the model hyperparameters.
+        5. Click 'Train Model' and wait for the model to finish training. Predictions, metrics, classification reports and confusion matrices are saved automatically under the results and visualizations directories.
+                     
                      
         ### Dataset Selection
         Multiscope allows for models to be trained on either a local dataset or a dataset available on the HuggingFace hub. Select the dataset source accordingly.
@@ -148,10 +154,11 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         ### Model Selection
         Multiscope is built around the *transformers* library, developed by HuggingFace. This means that models that are published on the HuggingFace platform can be used in this dashboard. Below
         are some recommended models for specific use cases. Copy/paste the model names in the *Model Name* text box. 
+                     
         Recommended (English) models:
         * BERT: ```bert-base-cased```, ```bert-large-cased```
         * RoBERTa: ```roberta-base```, ```roberta-large```
-        * DistilBERT: ```distilbert-base-cased```
+        * DistilBERT: ```distilbert/distilbert-base-cased```
         * DeBERTa: ```microsoft/deberta-base```
                      
         Recommended multi-lingual models:
@@ -212,10 +219,18 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=[dataset_statistics, train_df, val_df, test_df, 
                  label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
     ).then(
+        fn=lambda: gr.update(interactive=False), # disable train model button when loading data 
+        inputs=None, 
+        outputs=train_model_button
+    ).then(
         fn=load_data,
         inputs=[dataset_source, dataset_path, operations],
         outputs=[train_df, val_df, test_df, label_stats, 
                  token_stats, label_counts_plot, correlation_matrix_plot] 
+    ).then(
+        fn=lambda: gr.update(interactive=True), # enable train model button after loading data 
+        inputs=None, 
+        outputs=train_model_button
     )
 
     # train model or inference

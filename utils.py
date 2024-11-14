@@ -54,23 +54,41 @@ def create_cooccurrence_matrix(column_with_lists, cmap='OrRd'):
     return fig
 
 
-
-def get_dataset_stats(dfs, splits):
-    token_stats = pd.DataFrame()
+def get_label_stats(dfs, splits):
     label_stats = pd.DataFrame()
     
     for split, df in zip(splits, dfs):
         # label stats
         if 'labels' in df.columns:
+            lbl_cnt_per_text = df.labels.apply(len)
+
             max_cnt = max(df.labels.explode().value_counts())
             min_cnt = min(df.labels.explode().value_counts())
-            mean_cnt = df.labels.apply(len).mean()
+            mean_cnt = lbl_cnt_per_text.mean()
             median_cnt = np.median(df.labels.apply(len).to_numpy())
 
-            label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
-                        'mean count': mean_cnt, 'median count': median_cnt}
+            q1_cnt = np.quantile(lbl_cnt_per_text, .25)
+            q3_cnt = np.quantile(lbl_cnt_per_text, .75)
 
-        # token stats
+            label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
+                        'mean labels per text': mean_cnt, 'median labels per text': median_cnt, 'Q1': q1_cnt, 'Q3': q3_cnt}
+            
+        else:
+            splits.remove(split)
+  
+    #create column for results, since Gradio does not display df idx
+    label_stats[' '] = label_stats.index
+
+    label_stats = label_stats[[' '] + splits]
+
+    return label_stats
+
+
+
+def get_token_stats(dfs, splits):
+    token_stats = pd.DataFrame()
+    
+    for split, df in zip(splits, dfs):
         token_counts = get_token_counts(df.text.tolist())
         max_tkn_cnt = max(token_counts)
         min_tkn_cnt = min(token_counts)
@@ -85,17 +103,11 @@ def get_dataset_stats(dfs, splits):
         
     #create column for results, since Gradio does not display df idx
     token_stats[' '] = token_stats.index
-    label_stats[' '] = label_stats.index
-
-    print(label_stats.index)
-    print(label_stats)
 
     # re-order columns
     token_stats = token_stats[[' '] + splits]
-    label_stats = label_stats[[' '] + splits]
 
-    return label_stats, token_stats
-
+    return token_stats
 
 
 # Dataset utils
@@ -119,21 +131,33 @@ def load_local_dataset(dataset_path, subset):
         try:
             if dataset_path.endswith('.csv'):
                 df = pd.read_csv(dataset_path)
-                df.labels = df.labels.apply(literal_eval)
                 df = df[df['subset']==subset]
+                df = df.drop('subset', axis=1)
+                if subset == 'test':
+                    if df.labels.isnull().all():
+                        df = df.drop('labels', axis=1) # check if labels are nan
+                    else:
+                        df.labels = df.labels.apply(literal_eval) # if labels are present, literal eval   
+                else:
+                    df.labels = df.labels.apply(literal_eval)              
             
             elif dataset_path.endswith('.xlsx'):
                 df = pd.read_excel(dataset_path)
-                df.labels = df.labels.apply(literal_eval)
                 df = df[df['subset']==subset]
-                
+                df = df.drop('subset', axis=1)
+                if subset == 'test':
+                    if df.labels.isnull().all():
+                        df = df.drop('labels', axis=1) # check if labels are nan
+                    else:
+                        df.labels = df.labels.apply(literal_eval) # if labels are present, literal eval 
+                else:
+                    df.labels = df.labels.apply(literal_eval)    
 
             elif dataset_path.endswith('.json'):
                 with open(dataset_path, 'r', encoding='utf8') as f:
                     data = json.load(f)
                     if 'data' in data:
                         if subset in data['data']:
-                            print(data['data'][subset][0])
                             df = pd.DataFrame(data['data'][subset])
                         else:
                             raise gr.Error(f"Ensure that the subset names are correct! Found {list(data.keys())}, but expected ['train', 'val', 'test']")
@@ -164,27 +188,7 @@ def split_data(train_df):
         val_df = train_df.loc[val_index]
         new_train_df = train_df.loc[train_index]
 
-    return new_train_df, val_df    
-
-
-class CustomDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length=512):
-        self.texts = texts
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
-    def __len__(self):
-        return len(self.texts)
-
-    def __getitem__(self, idx):
-        text = self.texts[idx]
-        labels = self.labels[idx]
-        encoding = self.tokenizer(text, padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt')
-        encoding = {key: val.squeeze(0) for key, val in encoding.items()}
-        encoding['labels'] = torch.tensor(labels, dtype=torch.float)
-        return encoding
-
+    return new_train_df, val_df   
 
 # Data loading function
 def load_data(dataset_source, dataset_path, operations):
@@ -198,7 +202,6 @@ def load_data(dataset_source, dataset_path, operations):
                 train_df, val_df = split_data(train_df)
             else:
                 val_df = load_huggingface_dataset(dataset_path, subset="val")
-
         if 'Test' in operations:
             test_df = load_huggingface_dataset(dataset_path, subset="test")
 
@@ -209,20 +212,17 @@ def load_data(dataset_source, dataset_path, operations):
                 train_df, val_df = split_data(train_df)
             else:
                 val_df = load_local_dataset(dataset_path, subset="val")
-
         if 'Test' in operations:
             test_df = load_local_dataset(dataset_path, subset="test")
-
         if 'Train' not in operations:
             train_df = pd.DataFrame()
-        
         if 'Test' not in operations:
             test_df = pd.DataFrame()
 
 
     if 'Train' in operations:
         # create label counts plot
-        label_counts = train_df['labels'].explode().value_counts().plot.bar(title='Class counts')
+        label_counts = train_df['labels'].explode().value_counts().plot.bar()
         label_counts.update_layout(xaxis_type='category')
 
         # label co-occurrence matrix
@@ -231,7 +231,8 @@ def load_data(dataset_source, dataset_path, operations):
         #dataset stats
         datasets = [train_df, val_df] if test_df.empty else [train_df, val_df, test_df]
         splits = ['train', 'val'] if test_df.empty else ['train', 'val', 'test']
-        label_stats, token_stats = get_dataset_stats(datasets, splits)
+        label_stats = get_label_stats(datasets, splits)
+        token_stats = get_token_stats(datasets, splits)
 
         try:
             os.mkdir("./visualizations")
@@ -254,7 +255,9 @@ def load_data(dataset_source, dataset_path, operations):
     
     # only test 
     elif 'Test' in operations:
-        label_stats, token_stats = get_dataset_stats([test_df], ['test'])
+        label_stats = get_label_stats([test_df], ['test'])
+        token_stats = get_token_stats([test_df], ['test'])
+
         if 'labels' in test_df.columns:
             label_counts = test_df['labels'].explode().value_counts().plot.bar(title='Class counts')
             label_counts.update_layout(xaxis_type='category')
@@ -263,10 +266,10 @@ def load_data(dataset_source, dataset_path, operations):
         return (gr.update(visible=False), # make train_df invisible in app
                 pd.DataFrame(), 
                 gr.update(value=test_df, visible=True), # make test df visible
-                label_stats if 'labels' in test_df.columns else pd.DataFrame(), 
+                gr.update(value=label_stats if 'labels' in test_df.columns else pd.DataFrame(), visible= True if 'labels' in test_df.columns else False),
                 token_stats, 
                 gr.update(value=label_counts if 'labels' in test_df.columns else pd.DataFrame() , visible=True if 'labels' in test_df.columns else False),
-                gr.update(value=correlation_matrix, visible=True if 'labels' in test_df.columns else False))
+                gr.update(value=correlation_matrix if 'labels' in test_df.columns else go.Figure(), visible=True if 'labels' in test_df.columns else False))
 
 
 
@@ -297,7 +300,7 @@ def toggle_parameter_visibility(choice):
     
 def show_error(msg):
     if msg:
-        print('triggered')
+        print('triggered error msg')
         raise(gr.Error(msg))
 
 def update_button_text(operations):
