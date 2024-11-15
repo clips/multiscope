@@ -81,7 +81,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             # to-do: implement early stopping 
 
         with gr.Row():
-            train_model_button = gr.Button("Run")
+            train_model_button = gr.Button("Run", interactive=False)
 
         # WandB integration
         demo.integrate(wandb=wandb)
@@ -135,6 +135,12 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         Ensure that the following columns are present in the CSV or Excel files: "text" (contains texts as strings), 
         "labels" (contains *lists* of label names) and "subset" (can either be "train", "val" or "test"). The test set is not required to contain labels. In this case, Multiscope 
         only performs inference and does not calculate metrics.
+                    
+        | text | labels                  | subset |
+        |----- |-------------------------|--------|
+        | TEXT | [label 1, label 2, ...] | train |
+        | TEXT | [label 1, label 2, ...] | val |
+          
         
         ##### JSON files
         JSON files should adhere to the following structure:
@@ -219,10 +225,6 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=[dataset_statistics, train_df, val_df, test_df, 
                  label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
     ).then(
-        fn=lambda: gr.update(interactive=False), # disable train model button when loading data 
-        inputs=None, 
-        outputs=train_model_button
-    ).then(
         fn=load_data,
         inputs=[dataset_source, dataset_path, operations],
         outputs=[train_df, val_df, test_df, label_stats, 
@@ -238,6 +240,10 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         fn=lambda: gr.update(interactive=False), # disable button after clicking 
         inputs=None, 
         outputs=train_model_button
+    ).then(
+        fn=lambda: gr.update(interactive=False), # disable button after clicking 
+        inputs=None, 
+        outputs=load_data_button
     ).then(
         fn=lambda: gr.update(value="Training model..."),  
         inputs=None, 
@@ -257,6 +263,10 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         fn=lambda: gr.update(interactive=True),  # enable button after model is done training
         inputs=None, 
         outputs=train_model_button
+    ).then(
+        fn=lambda: gr.update(interactive=True),  # enable button after model is done training
+        inputs=None, 
+        outputs=load_data_button
     ).then(
         fn=lambda: gr.update(value="Finished training!"), # update loader 
         inputs=None, 

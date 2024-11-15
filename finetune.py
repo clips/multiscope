@@ -330,71 +330,77 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             raise gr.Error(f"Model could not be loaded from '{model_name}'. Please ensure the model is available.")
 
         # Prepare the test dataset
-        if only_predict:
-            print('predicting')
-            test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
-            preds = predict(test_dataset, model, batch_size)
+        try:
+            if only_predict:
+                print('predicting')
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
+                preds = predict(test_dataset, model, batch_size)
 
-            # save predictions
-            with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
-                json.dump(preds, f)
+                # save predictions
+                with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                    json.dump(preds, f)
 
-            return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
+                return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
 
 
-        # only make predictions
-        else:
-            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-            model.to(device)
+            # only make predictions
+            else:
+                device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+                model.to(device)
 
-            with open(os.path.join(output_dir, 'classes.json'), 'r', encoding='utf8') as f:
-                classes = json.load(f)
-            mlb = MultiLabelBinarizer(classes=classes)
-            mlb.fit(test_df.labels.tolist())
-            test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=False)
+                with open(os.path.join(output_dir, 'classes.json'), 'r', encoding='utf8') as f:
+                    classes = json.load(f)
+                mlb = MultiLabelBinarizer(classes=classes)
+                mlb.fit(test_df.labels.tolist())
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=False)
 
-            # Create a Trainer instance for evaluation
-            trainer = Trainer(
-                model=model,
-                compute_metrics=compute_metrics
-             )
+                # Create a Trainer instance for evaluation
+                trainer = Trainer(
+                    model=model,
+                    compute_metrics=compute_metrics
+                )
+                
+                # Predict test set
+                test_results = trainer.predict(test_dataset)
+                logits = test_results.predictions
+                preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+                preds = [p.tolist() for p in preds]   
+
+                label_ids = test_results.label_ids
+                test_metrics = test_results.metrics
+
+                # Log metrics and save them to JSON
+                wandb.log(test_metrics)
+
+                metrics_json_path = os.path.join(output_dir, "test_metrics.json")
+                with open(metrics_json_path, 'w') as f:
+                    json.dump(test_metrics, f)
+
+                # Prepare metrics DataFrame and classification report
+                metric_df = pd.DataFrame(data={"metric": test_metrics.keys(), "Score": test_metrics.values()})
+                metric_df['Score'] = metric_df['Score'].apply(lambda x: round(x, 5))
+                
+                report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
+                report_df['class'] = report_df.index
+                report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
+                report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
+
+                # Generate the confusion matrix heatmap and save
+                _, cnf_matrix = cm(label_ids, preds, False)
+                cnf_matrix_fig = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
+                cnf_matrix_fig.write_html("./visualizations/confusion_matrix.html")
+
+                # save predictions
+                with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
+                    json.dump(preds, f)
+
+                # save metric df and classification report
+                metric_df.to_json('./results/test_results.json')
+                report_df.to_json('./results/classification_report.json')
+
+                return metric_df, report_df, cnf_matrix_fig, ""
             
-            # Predict test set
-            test_results = trainer.predict(test_dataset)
-            logits = test_results.predictions
-            preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
-            preds = [p.tolist() for p in preds]   
-
-            label_ids = test_results.label_ids
-            test_metrics = test_results.metrics
-
-            # Log metrics and save them to JSON
-            wandb.log(test_metrics)
-
-            metrics_json_path = os.path.join(output_dir, "test_metrics.json")
-            with open(metrics_json_path, 'w') as f:
-                json.dump(test_metrics, f)
-
-            # Prepare metrics DataFrame and classification report
-            metric_df = pd.DataFrame(data={"metric": test_metrics.keys(), "Score": test_metrics.values()})
-            metric_df['Score'] = metric_df['Score'].apply(lambda x: round(x, 5))
-            
-            report_df = pd.DataFrame(classification_report(label_ids, preds, output_dict=True, target_names=mlb.classes_)).transpose()
-            report_df['class'] = report_df.index
-            report_df = report_df[['class', 'precision', 'recall', 'f1-score', 'support']]
-            report_df[['precision', 'recall', 'f1-score']] = report_df[['precision', 'recall', 'f1-score']].apply(lambda x: round(x, 5))
-
-            # Generate the confusion matrix heatmap and save
-            _, cnf_matrix = cm(label_ids, preds, False)
-            cnf_matrix_fig = matrix_to_heatmap(cnf_matrix, labels=mlb.classes_)
-            cnf_matrix_fig.write_html("./visualizations/confusion_matrix.html")
-
-            # save predictions
-            with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
-                json.dump(preds, f)
-
-            # save metric df and classification report
-            metric_df.to_json('./results/test_results.json')
-            report_df.to_json('./results/classification_report.json')
-
-            return metric_df, report_df, cnf_matrix_fig, ""
+        # Catch potential OOM error
+        except torch.cuda.OutOfMemoryError as e:
+            message = "GPU out of memory. Try lowering the batch size or loading a smaller model!"
+            return None, None, None, message
