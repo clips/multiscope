@@ -148,8 +148,6 @@ def compute_metrics(pred):
 
 
 def predict(test_dataset, model, batch_size):
-    print(batch_size)
-    print(type(batch_size))
     predictions = []
     loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 

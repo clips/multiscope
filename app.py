@@ -1,11 +1,9 @@
 import gradio as gr
 import pandas as pd
-from datasets import load_dataset
 import plotly.graph_objects as go
-from utils import (create_cooccurrence_matrix, load_data, train_model, wandb_report, toggle_parameter_visibility, load_huggingface_dataset, load_local_dataset,
-                   show_error, update_button_text, toggle_hyperparameters, toggle_data_display, toggle_classification_results)
-from finetune import finetune_transformer
-import torch
+from utils import (load_data, train_model)
+from gradio_utils import (wandb_report, toggle_parameter_visibility,
+                   show_error, update_button_text, toggle_hyperparameters, toggle_data_display, toggle_classification_results, toggle_subset_display)
 import wandb
 
 pd.options.plotting.backend = "plotly"
@@ -46,11 +44,14 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     # Main Interface
     gr.Markdown("# Multiscope: A Multi-Label Text Classification Dashboard")
 
+    
     with gr.Tab("Pipeline"):
         # Dataset loading
+        gr.Markdown("## Data Loading")
         with gr.Row(variant='panel'):
             dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source:", value="Local", info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
             dataset_path = gr.Textbox(label="Dataset Path:",  info="Enter the path to your local dataset or HuggingFace dataset.")
+            hf_subset = gr.Textbox(label="Subset:",  info="If applicable, select the subset of the HuggingFace dataset.", visible=False) 
             operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", info="Select the operations to be done.")
         
         with gr.Row():
@@ -72,6 +73,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
                 correlation_matrix_plot = gr.Plot(label="Co-occurrence Matrix", visible=False)
 
         # Classification
+        gr.Markdown("## Classification and Inference")
         with gr.Row(variant='panel'):
             clf_method = gr.Radio(["Fine-tune", "Prompt LLM"], label="Select Classification Method", value="Fine-tune")
             model_name = gr.Textbox(label="Model name:", value='roberta-base', interactive=True)
@@ -133,10 +135,10 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
                      
         ##### XLSX and CSV files              
         Ensure that the following columns are present in the CSV or Excel files: "text" (contains texts as strings), 
-        "labels" (contains *lists* of label names) and "subset" (can either be "train", "val" or "test"). The test set is not required to contain labels. In this case, Multiscope 
+        "labels" (contains *lists* of label names) and "split" (can either be "train", "val" or "test"). The test set is not required to contain labels. In this case, Multiscope 
         only performs inference and does not calculate metrics.
                     
-        | text | labels                  | subset |
+        | text | labels                  | split |
         |----- |-------------------------|--------|
         | TEXT | [label 1, label 2, ...] | train |
         | TEXT | [label 1, label 2, ...] | val |
@@ -222,11 +224,12 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         fn=lambda: (gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), 
                     gr.update(visible=True), gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)),
         inputs=None,
+
         outputs=[dataset_statistics, train_df, val_df, test_df, 
                  label_stats, token_stats, label_counts_plot, correlation_matrix_plot]
     ).then(
         fn=load_data,
-        inputs=[dataset_source, dataset_path, operations],
+        inputs=[dataset_source, dataset_path, hf_subset, operations],
         outputs=[train_df, val_df, test_df, label_stats, 
                  token_stats, label_counts_plot, correlation_matrix_plot] 
     ).then(
@@ -274,6 +277,12 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     )
 
     # change values of items based on selected operations
+    dataset_source.change(
+        fn=toggle_subset_display,
+        inputs=dataset_source,
+        outputs=[hf_subset]
+    )
+
     operations.change(
         fn=update_button_text,
         inputs=operations,

@@ -2,12 +2,10 @@
 import pandas as pd
 import numpy as np
 import os
-import torch
 import json
 import gradio as gr
 from datasets import load_dataset
-from torch.utils.data import Dataset
-from transformers import BertTokenizer, TrainerCallback
+from transformers import BertTokenizer
 from sklearn.preprocessing import MultiLabelBinarizer
 from datasets import load_dataset
 import plotly.graph_objects as go
@@ -114,26 +112,30 @@ def get_token_stats(dfs, splits):
 def load_huggingface_dataset(dataset_path, subset):
     if dataset_path:
         try:
-            dataset = load_dataset(dataset_path, streaming=True)
-            df = pd.DataFrame.from_dict(dataset[subset])
-        
+            if subset == '':
+                dataset = load_dataset(dataset_path, streaming=True)
+            else:
+                dataset = load_dataset(dataset_path, subset, streaming=True)
+            
+            
         except:
             raise gr.Error("Please enter a valid path to the dataset! Consult https://huggingface.co/datasets for a list of available datasets.")
 
-        return df
+        return dataset
     else:
         raise gr.Error("Please enter the path to the dataset.")
 
 
 
-def load_local_dataset(dataset_path, subset):
+def load_local_dataset(dataset_path, split):
     if dataset_path:
         try:
             if dataset_path.endswith('.csv'):
                 df = pd.read_csv(dataset_path)
-                df = df[df['subset']==subset]
+                df = df[df['subset']==split]
                 df = df.drop('subset', axis=1)
-                if subset == 'test':
+
+                if split == 'test':
                     if df.labels.isnull().all():
                         df = df.drop('labels', axis=1) # check if labels are nan
                     else:
@@ -143,9 +145,10 @@ def load_local_dataset(dataset_path, subset):
             
             elif dataset_path.endswith('.xlsx'):
                 df = pd.read_excel(dataset_path)
-                df = df[df['subset']==subset]
+                df = df[df['subset']==split]
                 df = df.drop('subset', axis=1)
-                if subset == 'test':
+
+                if split == 'test':
                     if df.labels.isnull().all():
                         df = df.drop('labels', axis=1) # check if labels are nan
                     else:
@@ -157,8 +160,8 @@ def load_local_dataset(dataset_path, subset):
                 with open(dataset_path, 'r', encoding='utf8') as f:
                     data = json.load(f)
                     if 'data' in data:
-                        if subset in data['data']:
-                            df = pd.DataFrame(data['data'][subset])
+                        if split in data['data']:
+                            df = pd.DataFrame(data['data'][split])
                         else:
                             raise gr.Error(f"Ensure that the subset names are correct! Found {list(data.keys())}, but expected ['train', 'val', 'test']")
                         
@@ -176,9 +179,9 @@ def load_local_dataset(dataset_path, subset):
         raise gr.Error("Please enter a path to the dataset.")
 
 
-def split_data(train_df):
+def split_data(train_df, test_size):
     train_df = train_df.reset_index()
-    msss = MultilabelStratifiedShuffleSplit(n_splits=2, test_size=0.15, random_state=0)
+    msss = MultilabelStratifiedShuffleSplit(n_splits=2, test_size=test_size, random_state=0)
     mlb = MultiLabelBinarizer()
 
     X = train_df['text'].values
@@ -191,29 +194,45 @@ def split_data(train_df):
     return new_train_df, val_df   
 
 # Data loading function
-def load_data(dataset_source, dataset_path, operations):
+def load_data(dataset_source, dataset_path, dataset_subset, operations):
     if not operations:
         raise gr.Error("Please select 'Train', 'Test' or both. Please refresh the app to continue.")
 
     if dataset_source == "HuggingFace":
         if 'Train' in operations:
-            train_df = load_huggingface_dataset(dataset_path, subset="train")
-            if 'Split Training Data' in operations:
-                train_df, val_df = split_data(train_df)
-            else:
-                val_df = load_huggingface_dataset(dataset_path, subset="val")
+            dataset = load_huggingface_dataset(dataset_path,  dataset_subset)
+            train_df = pd.DataFrame.from_dict(dataset['train'])
+
+            if 'val' not in dataset.keys():
+                try:
+                    val_df = pd.DataFrame.from_dict(dataset['validation'])
+                except KeyError:
+                    train_df, val_df = split_data(train_df, test_size=0.15)
+                
+            elif ('val' and 'validation' not in dataset.keys()) or 'Split Training Data' in operations:
+                train_df, val_df = split_data(train_df, test_size=0.15)
+
+            train_df.labels = train_df.labels.apply(lambda x: [str(l) for l in x])
+            val_df.labels = val_df.labels.apply(lambda x: [str(l) for l in x])
+
         if 'Test' in operations:
-            test_df = load_huggingface_dataset(dataset_path, subset="test")
+            test_df = load_huggingface_dataset(dataset_path,  dataset_subset)
+            test_df = pd.DataFrame.from_dict(dataset['test'])
+            test_df.labels = test_df.labels.apply(lambda x: [str(l) for l in x])
+
+        else:
+            test_df = pd.DataFrame()
+    
 
     else:
         if 'Train' in operations:
-            train_df = load_local_dataset(dataset_path, subset="train")
+            train_df = load_local_dataset(dataset_path, split="train")
             if 'Split Training Data' in operations:
-                train_df, val_df = split_data(train_df)
+                train_df, val_df = split_data(train_df, test_size=0.15)
             else:
-                val_df = load_local_dataset(dataset_path, subset="val")
+                val_df = load_local_dataset(dataset_path, split="val")
         if 'Test' in operations:
-            test_df = load_local_dataset(dataset_path, subset="test")
+            test_df = load_local_dataset(dataset_path, split="test")
         if 'Train' not in operations:
             train_df = pd.DataFrame()
         if 'Test' not in operations:
@@ -242,6 +261,8 @@ def load_data(dataset_source, dataset_path, operations):
         # save figures
         label_counts.write_html("./visualizations/label_counts.html")
         correlation_matrix.write_html("./visualizations/cooc_matrix.html")
+
+        print(train_df.columns)
 
         return (
             train_df,
@@ -286,53 +307,3 @@ def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, l
         return f"Classifying data with {model_name} using Distance-based Classification..."
 
 
-# Gradio functions
-
-def wandb_report(url):
-    iframe = f'<iframe src={url} style="border:none;height:1024px;width:100%">'
-    return gr.HTML(iframe, visible=False)
-
-def toggle_parameter_visibility(choice):
-    if choice == 'Fine-tune':
-        return gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
-    else:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False) 
-    
-def show_error(msg):
-    if msg:
-        print('triggered error msg')
-        raise(gr.Error(msg))
-
-def update_button_text(operations):
-    if "Train" in operations and "Test" in operations:
-        return "Train Model and Predict Test Set"
-    elif "Train" in operations:
-        return "Train Model"
-    elif "Test" in operations:
-        return "Predict Test Set"
-    else:
-        return "Run"
-
-def toggle_hyperparameters(operations):
-    if "Test" in operations and "Train" not in operations:
-        return gr.update(value='N/A', interactive=False), gr.update(value='N/A', interactive=False)
-    else:
-        return gr.update(value=5, interactive=True), gr.update(value=5e-5, interactive=True)
-    
-def toggle_data_display(operations):
-    if "Test" in operations and "Train" not in operations:
-        return (gr.update(label="Test Data"), 
-                gr.update(visible=False),  # Hide label stats
-                gr.update(visible=False),  # Hide class counts plot
-                gr.update(visible=False))  # Hide co-occurrence matrix
-    else:
-        return (gr.update(label="Training Dataset"),
-                gr.update(visible=True),
-                gr.update(visible=True),
-                gr.update(visible=True))
-
-def toggle_classification_results(operations):
-    if "Train" in operations and "Test" not in operations:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
-    else:
-        return gr.update(visible=True), gr.update(visible=True), gr.update(visible=False)
