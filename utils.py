@@ -295,7 +295,7 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
 
 
 # Model training function
-def train_model(clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations):
+def train_model(model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations, clf_method="Fine-tune"):
     if clf_method == "Fine-tune":
         metric_df, report_df, cnf_matrix, error_message = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, n_epochs, operations)
         return metric_df, report_df, cnf_matrix, error_message

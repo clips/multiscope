@@ -75,7 +75,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         # Classification
         gr.Markdown("## Classification and Inference")
         with gr.Row(variant='panel'):
-            clf_method = gr.Radio(["Fine-tune", "Prompt LLM"], label="Select Classification Method", value="Fine-tune")
+            # clf_method = gr.Radio(["Fine-tune", "Prompt LLM"], label="Select Classification Method", value="Fine-tune")
             model_name = gr.Textbox(label="Model name:", value='roberta-base', interactive=True)
             batch_size = gr.Textbox(label="Batch size:", value=8, interactive=True)
             n_epochs = gr.Textbox(label="Number of Training Epochs:", value=5, interactive=True)
@@ -257,7 +257,8 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=[report_row, results_row, loader] 
     ).then(
         fn=train_model,
-        inputs=[clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations],
+        inputs=[model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations],
+        # inputs=[clf_method, model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations],
         outputs=[metric_df, report_df, cnf_matrix, error_output]
     ).then(
         fn=show_error,
@@ -302,11 +303,11 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     )
 
     # change visibility of hyperparameters based on clf method
-    clf_method.change(
-        toggle_parameter_visibility,
-        inputs=[clf_method],
-        outputs=[batch_size, n_epochs, learning_rate] 
-    )
+    # clf_method.change(
+    #     toggle_parameter_visibility,
+    #     inputs=[clf_method],
+    #     outputs=[batch_size, n_epochs, learning_rate] 
+    # )
 
 
 # Launch Gradio app
