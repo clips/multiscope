@@ -1,4 +1,5 @@
 import gradio as gr
+import argparse
 import pandas as pd
 import plotly.graph_objects as go
 from utils import (load_data, train_model)
@@ -312,4 +313,13 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
 
 # Launch Gradio app
 if __name__ == "__main__":
-    demo.launch()
+    parser = argparse.ArgumentParser(description="Launch a Gradio app.")
+    parser.add_argument(
+        "--public",
+        action="store_true",
+        help="If set, creates a public URL for the app.",
+    )
+    args = parser.parse_args()
+
+    # Launch the app with or without a public URL based on the argument
+    demo.launch(share=args.public)
