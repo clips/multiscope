@@ -184,6 +184,11 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         * BioBERT (biomedical texts): ```dmis-lab/biobert-v1.1```
         * FinBERT (financial texts): ```ProsusAI/finbert```
                      
+        ### Model Hyperparameters
+        * Batch size: Determines the number of texts to be processed in a forward pass and backwards pass. The higher the batch size is, the higher the used GPU memory.
+        * Epochs: Refers to the number of passes of the entire dataset through the model.
+        * Learning Rate: The step size at each iteration. 
+                     
         ### Model Evaluation
         The fine-tuned model is evaluated on a validation set during fine-tuning and, if specified, on a held-out (annotated) test set. For this, the standard evaluation metrics
         are employed. These include precision, recall, macro- and micro-averaged F1-score, Exact Match Ratio and Hamming Loss.
