@@ -142,129 +142,6 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
                 feature_df = gr.Dataframe(label="Most Informative Features", visible=False) # becomes visible only after training an SVM
 
 
-    
-# CONTENT VISIBILITY UPDATES___________________________________________________________________________________________________________
-
-    # display errors 
-    error_output = gr.Markdown(value="", visible=False)
-
-    # Load data function linking
-    load_data_button.click( 
-        fn=lambda: (gr.update(visible=True), gr.update(visible=True), 
-                    gr.update(visible=True), gr.update(visible=True), 
-                    gr.update(visible=False), gr.update(visible=False)),
-        inputs=None,
-        outputs=[dataset_statistics, display_df, 
-                 label_stats, token_stats, 
-                 label_counts_plot, correlation_matrix_plot]
-    ).then(
-        fn=lambda: gr.update(interactive=False),
-        inputs=None,
-        outputs=load_data_button
-    ).then(
-        fn=load_data,
-        inputs=[dataset_source, dataset_path, hf_subset, operations],
-        outputs=[train_df, val_df, test_df, display_df,
-                 label_stats, token_stats,
-                 label_counts_plot, correlation_matrix_plot] 
-    ).then(
-        fn=lambda: gr.update(interactive=True), # enable train model button after loading data 
-        inputs=None, 
-        outputs=train_model_button
-    ).then(
-        fn=lambda: gr.update(interactive=True),
-        inputs=None,
-        outputs=load_data_button
-    )
-
-    # train model or inference
-    train_model_button.click(
-        fn=lambda: gr.update(interactive=False), # disable button after clicking 
-        inputs=None, 
-        outputs=train_model_button
-    ).then(
-        fn=lambda: gr.update(interactive=False), # disable button after clicking 
-        inputs=None, 
-        outputs=load_data_button
-    ).then(
-        fn=lambda: gr.update(value="Training model..."),  
-        inputs=None, 
-        outputs=loader
-    ).then(
-        fn = wandb_integration, 
-        inputs=[dataset_path, clf_method, gridsearch_method, model_name, batch_size, max_length, learning_rate], 
-        outputs=[wandb_report]
-    ).then(
-        fn= toggle_classification_results,
-        inputs=[operations],
-        outputs=[report_row, results_row, loader] 
-    ).then(
-        fn= toggle_feature_df,
-        inputs=[clf_method, operations],
-        outputs=[feature_df] 
-    ).then(
-        fn=train_model,
-        inputs=[output_dir, clf_method, model_name, train_df, val_df, test_df, batch_size, max_length, learning_rate, n_epochs, 
-                operations, 
-                gridsearch_method, trained_model_path, stopwords_path, data_language,
-                gs_ngram_range, n_ngram_range, gs_min_df, n_min_df, gs_max_df, n_max_df, gs_svm_c, n_svm_c, gs_svm_max_iter, n_svm_max_iter],
-        outputs=[metric_df, report_df, cnf_matrix, feature_df, error_output]
-    ).then(
-        fn=show_error,
-        inputs=error_output,  # Pass the error message to this function and raise error
-    ).then(
-        fn=lambda: gr.update(interactive=True),  # enable button after model is done training
-        inputs=None, 
-        outputs=train_model_button
-    ).then(
-        fn=lambda: gr.update(interactive=True),  # enable button after model is done training
-        inputs=None, 
-        outputs=load_data_button
-    ).then(
-        fn=lambda: gr.update(value="Finished training!"), # update loader 
-        inputs=None, 
-        outputs=loader
-    )
-
-    # change values of items based on selected operations
-    dataset_source.change(
-        fn=toggle_subset_display,
-        inputs=dataset_source,
-        outputs=[hf_subset]
-    )
-
-    operations.change(
-        fn=update_button_text,
-        inputs=operations,
-        outputs=train_model_button
-    )
-
-    operations.change(
-        fn=toggle_hyperparameters,
-        inputs=operations,
-        outputs=[max_length, n_epochs, learning_rate, gridsearch_method, trained_model_path]
-    )
-
-    operations.change(
-        fn=toggle_data_display,
-        inputs=operations,
-        outputs=[train_df, label_stats, label_counts_plot, correlation_matrix_plot]
-    )
-
-    # change visibility of hyperparameters based on clf method
-    clf_method.change(
-        fn=toggle_parameter_visibility,
-        inputs=[clf_method],
-        outputs=[model_name, batch_size, max_length, n_epochs, learning_rate, gridsearch_method, trained_model_path, stopwords_path, data_language, gridsearch_params] 
-    )
-
-    gridsearch_method.change(
-        fn=toggle_gridsearch_params,
-        inputs=[gridsearch_method],
-        outputs=[gridsearch_params]
-    )
-    
-
 # DOCUMENTATION_______________________________________________________________________________________________________________________________
 
     with gr.Tab("User Guidelines"):
@@ -387,6 +264,129 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     with gr.Row():
         gr.Markdown("""<center><img src="https://platformdh.uantwerpen.be/wp-content/uploads/2019/03/clariah_def.png" alt="Image" width="200"/></center>""")
         gr.Markdown("""<center><img src="https://thomasmore.be/sites/default/files/2022-11/UA-hor-1-nl-rgb.jpg" alt="Image" width="175"/></center>""")
+
+
+    
+# CONTENT VISIBILITY UPDATES___________________________________________________________________________________________________________
+
+    # display errors 
+    error_output = gr.Markdown(value="", visible=False)
+
+    # Load data function linking
+    load_data_button.click( 
+        fn=lambda: (gr.update(visible=True), gr.update(visible=True), 
+                    gr.update(visible=True), gr.update(visible=True), 
+                    gr.update(visible=False), gr.update(visible=False)),
+        inputs=None,
+        outputs=[dataset_statistics, display_df, 
+                 label_stats, token_stats, 
+                 label_counts_plot, correlation_matrix_plot]
+    ).then(
+        fn=lambda: gr.update(interactive=False),
+        inputs=None,
+        outputs=load_data_button
+    ).then(
+        fn=load_data,
+        inputs=[dataset_source, dataset_path, hf_subset, operations],
+        outputs=[train_df, val_df, test_df, display_df,
+                 label_stats, token_stats,
+                 label_counts_plot, correlation_matrix_plot] 
+    ).then(
+        fn=lambda: gr.update(interactive=True), # enable train model button after loading data 
+        inputs=None, 
+        outputs=train_model_button
+    ).then(
+        fn=lambda: gr.update(interactive=True),
+        inputs=None,
+        outputs=load_data_button
+    )
+
+    # train model or inference
+    train_model_button.click(
+        fn=lambda: gr.update(interactive=False), # disable button after clicking 
+        inputs=None, 
+        outputs=train_model_button
+    ).then(
+        fn=lambda: gr.update(interactive=False), # disable button after clicking 
+        inputs=None, 
+        outputs=load_data_button
+    ).then(
+        fn=lambda: gr.update(value="Training model..."),  
+        inputs=None, 
+        outputs=loader
+    ).then(
+        fn = wandb_integration, 
+        inputs=[dataset_path, clf_method, gridsearch_method, model_name, batch_size, max_length, learning_rate], 
+        outputs=[wandb_report]
+    ).then(
+        fn= toggle_classification_results,
+        inputs=[operations],
+        outputs=[report_row, results_row, loader] 
+    ).then(
+        fn= toggle_feature_df,
+        inputs=[clf_method, operations],
+        outputs=[feature_df] 
+    ).then(
+        fn=train_model,
+        inputs=[output_dir, clf_method, model_name, train_df, val_df, test_df, batch_size, max_length, learning_rate, n_epochs, 
+                operations, 
+                gridsearch_method, trained_model_path, stopwords_path, data_language,
+                gs_ngram_range, n_ngram_range, gs_min_df, n_min_df, gs_max_df, n_max_df, gs_svm_c, n_svm_c, gs_svm_max_iter, n_svm_max_iter],
+        outputs=[metric_df, report_df, cnf_matrix, feature_df, error_output]
+    ).then(
+        fn=show_error,
+        inputs=error_output,  # Pass the error message to this function and raise error
+    ).then(
+        fn=lambda: gr.update(interactive=True),  # enable button after model is done training
+        inputs=None, 
+        outputs=train_model_button
+    ).then(
+        fn=lambda: gr.update(interactive=True),  # enable button after model is done training
+        inputs=None, 
+        outputs=load_data_button
+    ).then(
+        fn=lambda: gr.update(value="Finished training!"), # update loader 
+        inputs=None, 
+        outputs=loader
+    )
+
+    # change values of items based on selected operations
+    dataset_source.change(
+        fn=toggle_subset_display,
+        inputs=dataset_source,
+        outputs=[hf_subset]
+    )
+
+    operations.change(
+        fn=update_button_text,
+        inputs=operations,
+        outputs=train_model_button
+    )
+
+    operations.change(
+        fn=toggle_hyperparameters,
+        inputs=operations,
+        outputs=[max_length, n_epochs, learning_rate, gridsearch_method, trained_model_path]
+    )
+
+    operations.change(
+        fn=toggle_data_display,
+        inputs=operations,
+        outputs=[train_df, label_stats, label_counts_plot, correlation_matrix_plot]
+    )
+
+    # change visibility of hyperparameters based on clf method
+    clf_method.change(
+        fn=toggle_parameter_visibility,
+        inputs=[clf_method],
+        outputs=[model_name, batch_size, max_length, n_epochs, learning_rate, gridsearch_method, trained_model_path, stopwords_path, data_language, gridsearch_params] 
+    )
+
+    gridsearch_method.change(
+        fn=toggle_gridsearch_params,
+        inputs=[gridsearch_method],
+        outputs=[gridsearch_params]
+    )
 
 
 # Launch Gradio app
