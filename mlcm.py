@@ -5,6 +5,7 @@
 '''
 
 import numpy as np
+import plotly.graph_objects as go
 
 def cm(label_true,label_pred,print_note=True):
     '''
@@ -130,163 +131,55 @@ def cm(label_true,label_pred,print_note=True):
     return conf_mat, normal_conf_mat
 
 
-# ########################################################################### #
-# Developing a function to produce some statistics based on the MLCM  
-# ########################################################################### #
-def stats(conf_mat, print_binary_mat=True):
-    '''
-    Computes one-vs-rest confusion matrices for all classes of multi-label data
-    The One-vs-rest is a 2x2 matrix contains [TN,FP; FN,TP]
-    Prints precision, recall, and f1-score for each class.
-    Prints micro, macro, and weighted average of precision, recall, and
-    F1-score over all classes.
-    
-    Parameters
-    ----------
-    conf_mat : multi-label confusion matrix (MLCM)
-        ndarray of shape (num_classes+1, num_classes+1).
-        Rows represent True labels and columns represent Predicted labels.
-        The last row is for "No True Label" assigned (NTL).
-        The last column is for "No Predicted Label" found (NPL).
-        
-    print_binary_mat : bool, default=True
-        If true, prints all one-vs-rest confusion matrices.
-        
-    Returns
-    -------
-    one_vs_rest : a set of one vs rest (binary) confusion matrices, one for
-                 each class
-    
-    
-    prints
-    ------
-    precision, recall, F1-score, and weight for each of classes, also micro, 
-    macro, and weighted average of precision, recall, and F1-score
-    over all classes.
+def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', save_path=None, labels=None, annotate=True):
+    """
+    Converts a numpy matrix to a heatmap with annotations and tick labels using Plotly.
 
-    Notes
-    -----
-    For the cases that all instances in the dataset have at least one label, 
-    all cells in the last row of MLCM are zero and are ignored for calculating 
-    the statistics, but the information in the last column of MLCM are involved 
-    in calculating the statistics.
+    Parameters:
+    matrix (numpy.ndarray): The matrix to be converted to a heatmap.
+    cmap (str): The colormap to use for the heatmap. Default is 'OrRd'.
+    colorbar_label (str): The label for the colorbar. Default is 'Value'.
+    title (str): The title for the heatmap. Default is 'Confusion Matrix'.
+    save_path (str): The path to save the heatmap image. If None, the heatmap will be shown but not saved.
+    labels (list): The labels for the heatmap axes. Default is None.
+    annotate (bool): Whether to annotate cells with values. Default is True.
 
-    Implemented by Mohammadreza Heydarian, at BioMedic.AI (McMaster University)
-    Aug 13, 2020; Modified: Feb 8, 2022.
-    '''
-    num_classes = conf_mat.shape[1]
-    tp = np.zeros(num_classes, dtype=np.int64)  
-    tn = np.zeros(num_classes, dtype=np.int64)  
-    fp = np.zeros(num_classes, dtype=np.int64)  
-    fn = np.zeros(num_classes, dtype=np.int64)  
+    Returns:
+    fig (plotly.graph_objects.Figure): The generated plotly figure.
+    """
+    labels = list(labels)
+    # Prepare labels for the axes
+    # labels = labels if labels is not None else list(range(matrix.shape[0]))
 
-    precision = np.zeros(num_classes, dtype=np.float)  
-    recall = np.zeros(num_classes, dtype=np.float)  
-    f1_score = np.zeros(num_classes, dtype=np.float)  
+    # Create text annotations for the heatmap
+    annotations = np.round(matrix, 2).astype(str) if annotate else None
 
-    # Calculating TP, TN, FP, FN from MLCM
-    for k in range(num_classes): 
-        tp[k] = conf_mat[k][k]
-        for i in range(num_classes):
-            if i != k:
-                tn[k] += conf_mat[i][i]
-                fp[k] += conf_mat[i][k]
-                fn[k] += conf_mat[k][i]
+    # Create heatmap using plotly
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=matrix,
+            x=labels + ['NPL'],  # X-axis labels
+            y=labels + ['NTL'],  # Y-axis labels
+            colorscale=cmap,
+            text=annotations,
+            hoverinfo="z",  # Show values on hover
+            showscale=True,
+            colorbar=dict(title=colorbar_label),
+            texttemplate="%{text}" if annotate else None,  # Display annotations
+            # zmin=matrix.min(),
+            # zmax=matrix.max()
+        )
+    )
 
-    # Creating one_vs_rest confusion matrices
-    one_vs_rest = np.zeros((num_classes,2,2), dtype='int64')
-    one_vs_rest [:,0,0] = tn
-    one_vs_rest [:,0,1] = fp
-    one_vs_rest [:,1,0] = fn
-    one_vs_rest [:,1,1] = tp
-    if print_binary_mat:
-        print(one_vs_rest)
+    # Set layout options
+    fig.update_layout(
+        xaxis=dict(title='Predicted', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NPL']),
+        yaxis=dict(title='Truth', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NTL']),
+        autosize=False,
+        width=600,
+        height=500
+    )
 
-    # Calculating precision, recall, and F1-score for each of classes
-    precision = tp/(tp+fp)
-    recall = tp/(tp+fn)
-    f1_score = 2*tp/(2*tp+fn+fp)
 
-    divide = conf_mat.sum(axis=1, dtype='int64') # sum of each row of MLCM
-
-    if divide[-1] != 0: # some instances have not been assigned with any label 
-        micro_precision = tp.sum()/(tp.sum()+fp.sum())
-        macro_precision = precision.sum()/num_classes
-        weighted_precision = (precision*divide).sum()/divide.sum()
-
-        micro_recall = tp.sum()/(tp.sum()+fn.sum())
-        macro_recall = recall.sum()/num_classes
-        weighted_recall = (recall*divide).sum()/divide.sum()
-
-        micro_f1 = (2*tp.sum())/(2*tp.sum()+fn.sum()+fp.sum())
-        macro_f1 = f1_score.sum()/num_classes
-        weighted_f1 = (f1_score*divide).sum()/divide.sum()
-
-        print('\n       class#     precision        recall      f1-score\
-        weight\n')
-        sp = '        '
-        sp2 = '  '
-        total_weight = divide.sum()
-        float_formatter = "{:.2f}".format
-        for k in range(num_classes-1):
-            print(sp2,sp,k,sp,float_formatter(precision[k]),sp, \
-                  float_formatter(recall[k]), sp,float_formatter(f1_score[k]),\
-                  sp,divide[k])
-        k = num_classes-1
-        print(sp,' NTL',sp,float_formatter(precision[k]),sp, \
-              float_formatter(recall[k]), sp,float_formatter(f1_score[k]), \
-              sp,divide[k])
-
-        print('\n    micro avg',sp,float_formatter(micro_precision),sp, \
-              float_formatter(micro_recall),sp,float_formatter(micro_f1),\
-              sp,total_weight)
-        print('    macro avg',sp,float_formatter(macro_precision),sp,
-              float_formatter(macro_recall),sp,float_formatter(macro_f1),sp,\
-              total_weight)
-        print(' weighted avg',sp,float_formatter(weighted_precision),sp,\
-              float_formatter(weighted_recall),sp, \
-              float_formatter(weighted_f1),sp,total_weight)
-    else:
-        precision = precision[:-1]
-        recall = recall[:-1]
-        f1_score = f1_score[:-1]
-        divide = divide[:-1]
-        num_classes -= 1
-
-        micro_precision = tp.sum()/(tp.sum()+fp.sum())
-        macro_precision = precision.sum()/num_classes
-        weighted_precision = (precision*divide).sum()/divide.sum()
-
-        micro_recall = tp.sum()/(tp.sum()+fn.sum())
-        macro_recall = recall.sum()/num_classes
-        weighted_recall = (recall*divide).sum()/divide.sum()
-
-        micro_f1 = (2*tp.sum())/(2*tp.sum()+fn.sum()+fp.sum())
-        macro_f1 = f1_score.sum()/num_classes
-        weighted_f1 = (f1_score*divide).sum()/divide.sum()
-
-        print('\n       class#     precision        recall      f1-score\
-        weight\n')
-        sp = '        '
-        sp2 = '  '
-        total_weight = divide.sum()
-        float_formatter = "{:.2f}".format
-        for k in range(num_classes):
-            print(sp2,sp,k,sp,float_formatter(precision[k]),sp, \
-                  float_formatter(recall[k]), sp,\
-                  float_formatter(f1_score[k]),sp,divide[k])
-        print(sp,' NoC',sp,'There is not any data with no true-label assigned!')
-
-        print('\n    micro avg',sp,float_formatter(micro_precision),sp,\
-              float_formatter(micro_recall),sp,float_formatter(micro_f1),\
-              sp,total_weight)
-        print('    macro avg',sp,float_formatter(macro_precision),sp,\
-              float_formatter(macro_recall),sp,float_formatter(macro_f1),sp,\
-              total_weight)
-        print(' weighted avg',sp,float_formatter(weighted_precision),sp,\
-              float_formatter(weighted_recall),sp,\
-              float_formatter(weighted_f1),sp,total_weight)
-
-    return one_vs_rest
-
+    return fig
     

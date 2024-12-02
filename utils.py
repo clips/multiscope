@@ -11,17 +11,17 @@ from datasets import load_dataset
 import plotly.graph_objects as go
 from itertools import combinations
 from finetune import finetune_transformer
+from svm import train_svm
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from sklearn.preprocessing import MultiLabelBinarizer
 from ast import literal_eval
+import nltk
 
 
 def get_token_counts(texts):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     token_counts = [len(tokenizer.tokenize(text)) for text in texts]
     return np.array(token_counts)
-
-
 
 def create_cooccurrence_matrix(column_with_lists, cmap='OrRd'):
     # Flatten the list of labels and get unique labels
@@ -46,8 +46,14 @@ def create_cooccurrence_matrix(column_with_lists, cmap='OrRd'):
         x=normalized_matrix.columns,
         y=normalized_matrix.index,
         colorscale=cmap,
-        colorbar=dict(title="Normalized Co-occurrence")
     ))
+
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(t=50),
+        width=600,
+        height=500
+    )
 
     return fig
 
@@ -59,17 +65,22 @@ def get_label_stats(dfs, splits):
         # label stats
         if 'labels' in df.columns:
             lbl_cnt_per_text = df.labels.apply(len)
+            lens = df.labels.apply(len).to_numpy()
 
             max_cnt = max(df.labels.explode().value_counts())
             min_cnt = min(df.labels.explode().value_counts())
-            mean_cnt = lbl_cnt_per_text.mean()
-            median_cnt = np.median(df.labels.apply(len).to_numpy())
+            mean_cnt = round(lbl_cnt_per_text.mean(),5)
+            median_cnt = np.median(lens)
+            std_cnt = round(lens.std(),5)
 
             q1_cnt = np.quantile(lbl_cnt_per_text, .25)
             q3_cnt = np.quantile(lbl_cnt_per_text, .75)
 
-            label_stats[split] = {'min count': min_cnt, 'max count': max_cnt,
-                        'mean labels per text': mean_cnt, 'median labels per text': median_cnt, 'Q1': q1_cnt, 'Q3': q3_cnt}
+            label_stats[split] = {
+                        'min count': min_cnt, 'max count': max_cnt,
+                        'mean labels per text': mean_cnt, 'median labels per text': median_cnt, 
+                        'std': std_cnt,
+                        'Q1': q1_cnt, 'Q3': q3_cnt}
             
         else:
             splits.remove(split)
@@ -88,15 +99,18 @@ def get_token_stats(dfs, splits):
     
     for split, df in zip(splits, dfs):
         token_counts = get_token_counts(df.text.tolist())
+
         max_tkn_cnt = max(token_counts)
         min_tkn_cnt = min(token_counts)
-        mean_tkn_cnt = token_counts.mean()
+        mean_tkn_cnt = round(token_counts.mean(), 5)
         median_tkn_cnt = np.median(token_counts)
+        std_tkn_cnt = round(token_counts.std(),5)
         q1_tkn_cnt = np.quantile(token_counts, .25)
         q3_tkn_cnt = np.quantile(token_counts, .75)
 
-        token_stats[split] = {'min count': min_tkn_cnt, 'max count': max_tkn_cnt,
-                    'mean count': mean_tkn_cnt, 'median count': median_tkn_cnt, 
+        token_stats[split] = {
+                    'min count': min_tkn_cnt, 'max count': max_tkn_cnt,
+                    'mean count': mean_tkn_cnt, 'median count': median_tkn_cnt, 'std': std_tkn_cnt,
                     'Q1': q1_tkn_cnt, 'Q3': q3_tkn_cnt}
         
     #create column for results, since Gradio does not display df idx
@@ -242,7 +256,12 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
     if 'Train' in operations:
         # create label counts plot
         label_counts = train_df['labels'].explode().value_counts().plot.bar()
-        label_counts.update_layout(xaxis_type='category')
+        label_counts.update_layout(
+            showlegend=False,
+            xaxis_type='category',  
+            margin=dict(t=50),
+            width=500,
+            height=500)
 
         # label co-occurrence matrix
         correlation_matrix = create_cooccurrence_matrix(train_df.labels)
@@ -262,12 +281,13 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
         label_counts.write_html("./visualizations/label_counts.html")
         correlation_matrix.write_html("./visualizations/cooc_matrix.html")
 
-        print(train_df.columns)
-
         return (
             train_df,
             val_df, 
             test_df,
+
+            gr.update(value=train_df.head(10), label="Train Dataset"),
+
             label_stats,
             token_stats,
             gr.update(value=label_counts, visible=True),
@@ -286,24 +306,121 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
 
         return (gr.update(visible=False), # make train_df invisible in app
                 pd.DataFrame(), 
-                gr.update(value=test_df, visible=True), # make test df visible
+                gr.update(value=test_df, visible=False), # make test df visible
+
+                gr.update(value=test_df.head(10), label="Test Dataset"),
+
                 gr.update(value=label_stats if 'labels' in test_df.columns else pd.DataFrame(), visible= True if 'labels' in test_df.columns else False),
                 token_stats, 
                 gr.update(value=label_counts if 'labels' in test_df.columns else pd.DataFrame() , visible=True if 'labels' in test_df.columns else False),
                 gr.update(value=correlation_matrix if 'labels' in test_df.columns else go.Figure(), visible=True if 'labels' in test_df.columns else False))
+    
+
+def generate_run_name(clf_method, gridsearch_method, model_name, batch_size, max_length, learning_rate):
+    """
+    Generate a unique run name for wandb based on provided arguments.
+    Args:
+        *args: Variable length argument list for text inputs.
+    Returns:
+        A string representing the run name.
+    """
+    # Combine all inputs into a single string, separated by underscores
+    if clf_method == "Fine-tune Transformer":
+        if '/' in model_name:
+            model_name = model_name.split('/')[1]
+        run_name = f'{model_name}_{batch_size}_{max_length}_{learning_rate}'
+    
+    else:
+        run_name = f'SVM_{gridsearch_method}'
+
+    return run_name
+
+def generate_output_dir(output_dir, clf_method, model_name, batch_size, max_length, learning_rate, gridsearch_method):
+    if output_dir != '':
+        return output_dir
+    
+    else:
+        output_dir = generate_run_name(clf_method, gridsearch_method, model_name, batch_size,  max_length, learning_rate)
+        return output_dir
+        
+
+def generate_gridsearch_params(
+    gridsearch_method,
+    gs_ngram_range, n_ngram_range,
+    gs_min_df, n_min_df,
+    gs_max_df, n_max_df,
+    gs_svm_c, n_svm_c,
+    gs_svm_max_iter, n_svm_max_iter
+):
+   
+    param_grid = {}
+    if gridsearch_method =='Standard':
+        param_grid['tfidf__ngram_range'] = [(1, 1), (1, 2), (1, 3)]
+        param_grid['tfidf__min_df'] = [1, 2, 10]
+        param_grid['tfidf__max_df'] = [0.8, 1.0]
+        param_grid['svm__estimator__C'] =  [1, 0.1, 10]
+        param_grid['svm__estimator__max_iter'] = [100, 500, 1000]
+        
+
+
+    if gridsearch_method =='Custom':
+        # Parameters for TfidfVectorizer
+        if gs_ngram_range:
+            ngram_range_options = [(1, 1), (1, 2), (1, 3), (2, 2), (2, 3)]
+            param_grid['tfidf__ngram_range'] = ngram_range_options[:n_ngram_range]
+
+        if gs_min_df:
+            min_df_options = [1, 2, 5, 10, 20]
+            param_grid['tfidf__min_df'] = min_df_options[:n_min_df]
+
+        if gs_max_df:
+            max_df_options = [0.8, 0.9, 1.0, 0.7, 0.6]
+            param_grid['tfidf__max_df'] = max_df_options[:n_max_df]
+
+        # Parameters for SVM
+        if gs_svm_c:
+            svm_c_options = [1, 0.1, 10, 100, 0.01]
+            param_grid['svm__estimator__C'] = svm_c_options[:n_svm_c]
+
+        if gs_svm_max_iter:
+            svm_max_iter_options = [1000, 2000, 500, 100, 5000]
+            param_grid['svm__estimator__max_iter'] = svm_max_iter_options[:n_svm_max_iter]
+
+        # Filter out any parameters that are empty or None
+        param_grid = {key: value for key, value in param_grid.items() if value}
+
+    return param_grid
+
+
+def get_stopwords(stopwords_path, language):
+    if stopwords_path:
+        with open(stopwords_path, 'r', encoding='utf8') as f:
+            stopwords = f.readlines()
+    else:
+        stopwords = nltk.corpus.stopwords.words(language if language else 'english')
+        
+    return stopwords
 
 
 
 # Model training function
-def train_model(model_name, train_df, val_df, test_df, batch_size, learning_rate, n_epochs, operations, clf_method="Fine-tune"):
-    if clf_method == "Fine-tune":
-        metric_df, report_df, cnf_matrix, error_message = finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, n_epochs, operations)
-        return metric_df, report_df, cnf_matrix, error_message
-    
-    elif clf_method == "Prompt LLM":
-        return f"Classifying data with {model_name} using Prompt LLM..."
+def train_model(output_dir, clf_method, model_name, train_df, val_df, test_df, batch_size, max_length, learning_rate, n_epochs, operations, gridsearch_method, trained_model_path, stopwords_path, data_language,
+                # gridsearch
+                gs_ngram_range, n_ngram_range, gs_min_df, n_min_df, gs_max_df, n_max_df, gs_svm_c, n_svm_c, gs_svm_max_iter, n_svm_max_iter          
+                ):
 
-    elif clf_method == "Distance-based Classification":
-        return f"Classifying data with {model_name} using Distance-based Classification..."
+    output_dir = generate_output_dir(output_dir, clf_method, model_name, batch_size, max_length, learning_rate, gridsearch_method)
+    
+    if clf_method == "Fine-tune Transformer":
+        metric_df, report_df, cnf_matrix, feature_df, error_message = finetune_transformer(output_dir, train_df, val_df, test_df, model_name, batch_size, max_length, learning_rate, n_epochs, operations)
+        return metric_df, report_df, cnf_matrix, feature_df, error_message
+    
+    else:
+        gridsearch_params = generate_gridsearch_params(gridsearch_method, gs_ngram_range, n_ngram_range, gs_min_df, n_min_df, 
+                                                       gs_max_df, n_max_df, gs_svm_c, n_svm_c, gs_svm_max_iter, n_svm_max_iter)
+        stopwords = get_stopwords(stopwords_path, data_language)
+        metric_df, report_df, cnf_matrix, feature_df, error_message = train_svm(output_dir, train_df, val_df, test_df, operations, gridsearch_method, gridsearch_params, trained_model_path, stopwords)
+        return metric_df, report_df, cnf_matrix, feature_df, error_message
+
 
 

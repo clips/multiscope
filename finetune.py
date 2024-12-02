@@ -4,12 +4,12 @@ from torch.utils.data import DataLoader, Dataset
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, TrainerCallback
 from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score, hamming_loss, classification_report
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score, hamming_loss, classification_report, ndcg_score
 import wandb
 import json
 import os
 import pandas as pd
-from mlcm import cm
+from mlcm import cm, matrix_to_heatmap
 import numpy as np
 import plotly.graph_objects as go
 import safetensors
@@ -17,61 +17,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-def matrix_to_heatmap(matrix, cmap='OrRd', colorbar_label='Value', title='Confusion Matrix', save_path=None, labels=None, annotate=True):
-    """
-    Converts a numpy matrix to a heatmap with annotations and tick labels using Plotly.
-
-    Parameters:
-    matrix (numpy.ndarray): The matrix to be converted to a heatmap.
-    cmap (str): The colormap to use for the heatmap. Default is 'OrRd'.
-    colorbar_label (str): The label for the colorbar. Default is 'Value'.
-    title (str): The title for the heatmap. Default is 'Confusion Matrix'.
-    save_path (str): The path to save the heatmap image. If None, the heatmap will be shown but not saved.
-    labels (list): The labels for the heatmap axes. Default is None.
-    annotate (bool): Whether to annotate cells with values. Default is True.
-
-    Returns:
-    fig (plotly.graph_objects.Figure): The generated plotly figure.
-    """
-    labels = list(labels)
-    # Prepare labels for the axes
-    # labels = labels if labels is not None else list(range(matrix.shape[0]))
-
-    # Create text annotations for the heatmap
-    annotations = np.round(matrix, 2).astype(str) if annotate else None
-
-    # Create heatmap using plotly
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=matrix,
-            x=labels + ['NPL'],  # X-axis labels
-            y=labels + ['NTL'],  # Y-axis labels
-            colorscale=cmap,
-            text=annotations,
-            hoverinfo="z",  # Show values on hover
-            showscale=True,
-            colorbar=dict(title=colorbar_label),
-            texttemplate="%{text}" if annotate else None,  # Display annotations
-            # zmin=matrix.min(),
-            # zmax=matrix.max()
-        )
-    )
-
-    # Set layout options
-    fig.update_layout(
-        title=title,
-        xaxis=dict(title='Predicted', tickmode='array', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NPL']),
-        yaxis=dict(title='Truth', tickmode='array', tickvals=list(range(len(labels) + 1)), ticktext=labels + ['NTL']),
-        autosize=False,
-        width=800,
-        height=600
-    )
-
-    return fig
-
-
 class CustomDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length=512):
+    def __init__(self, texts, labels, tokenizer, max_length):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
@@ -102,7 +49,7 @@ class SaveTokenizerCallback(TrainerCallback):
 
 
 
-def prepare_data(df, mlb, tokenizer, no_labels, max_length=512):
+def prepare_data(df, mlb, tokenizer, no_labels, max_length):
     texts = df.text
     labels = None
 
@@ -116,7 +63,8 @@ def prepare_data(df, mlb, tokenizer, no_labels, max_length=512):
 
 def compute_metrics(pred):
     labels = pred.label_ids
-    preds = torch.sigmoid(torch.tensor(pred.predictions)) > 0.5
+    sig = torch.sigmoid(torch.tensor(pred.predictions))
+    preds = sig > 0.5
     
     # Micro and Macro Precision, Recall, F1
     micro_precision, micro_recall, micro_f1, _ = precision_recall_fscore_support(labels, preds, average='micro')
@@ -127,6 +75,12 @@ def compute_metrics(pred):
     
     # Hamming Loss
     h_loss = hamming_loss(labels, preds)
+
+    # NDCG@k
+    ndcg_1 = ndcg_score(labels, sig, k=1)
+    ndcg_3 = ndcg_score(labels, sig, k=3)
+    ndcg_5 = ndcg_score(labels, sig, k=5)
+    ndcg_10 = ndcg_score(labels, sig, k=10)
     
     # Sample-wise F1
     sample_f1 = precision_recall_fscore_support(labels, preds, average='samples')[2]
@@ -140,7 +94,13 @@ def compute_metrics(pred):
         "macro_f1": macro_f1,
         "exact_match_ratio": exact_match,
         "hamming_loss": h_loss,
-        "sample_f1": sample_f1
+        "sample_f1": sample_f1,
+
+        "ndcg@1": ndcg_1,
+        "ndcg@3": ndcg_3,
+        "ndcg@5": ndcg_5,
+        "ndcg@10": ndcg_10
+
     }
     
     return metrics
@@ -156,22 +116,33 @@ def predict(test_dataset, model, batch_size):
             inputs = {k: v.to(model.device) for k, v in batch.items()}  # Exclude 'labels' if not present
             outputs = model(**inputs)
             logits = outputs.logits.cpu()
-            preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+            sig = torch.sigmoid(torch.tensor(logits))
+            preds = (sig > 0.5).int().numpy()
             predictions.append(preds.tolist())
 
-    return predictions
+    return predictions, sig
 
 
 
-def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, learning_rate, n_epochs, operations, output_dir="./results", save_best_metric="macro_f1"):
-    try:
-        os.mkdir(output_dir)
-    except FileExistsError:
-        pass
+def finetune_transformer(
+        output_dir, 
+        train_df, 
+        val_df, 
+        test_df, 
+        model_name, 
+        batch_size, 
+        max_length,
+        learning_rate, 
+        n_epochs, 
+        operations,
+        save_best_metric="macro_f1"
+    ):
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
 
     # Initialiaz MLB
     mlb = MultiLabelBinarizer()
-
     batch_size = int(batch_size)
 
     # Parse operations to be performed
@@ -217,8 +188,8 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             raise gr.Error(f"Model '{model_name}' might not exist. Visit https://huggingface.co/models for an overview of remote models, or load a valid local model.")
         
         # create datasets
-        train_dataset = prepare_data(train_df, mlb, tokenizer, no_labels=False)
-        val_dataset = prepare_data(val_df, mlb, tokenizer, no_labels=False)
+        train_dataset = prepare_data(train_df, mlb, tokenizer, no_labels=False, max_length=max_length)
+        val_dataset = prepare_data(val_df, mlb, tokenizer, no_labels=False, max_length=max_length)
     
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         model.to(device)
@@ -235,7 +206,8 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
             load_best_model_at_end=True,
             metric_for_best_model=save_best_metric,
             save_total_limit=int(n_epochs),
-            report_to='wandb'
+            report_to='wandb',
+            # run_name = f'{model_name}_{batch_size}_{learning_rate}'
         )
 
         trainer = Trainer(
@@ -250,36 +222,39 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
         # Train and evaluate
         try:
             trainer.train()
-            print('Finished training!')
             
             # Evaluate on test set
             if 'Test' in operations:
-                print('Testing')
                 # Load best model based on metric
                 best_model_path = os.path.join(output_dir, "pytorch_model.bin")
                 if os.path.exists(best_model_path):
                     model = AutoModelForSequenceClassification.from_pretrained(output_dir)
 
-                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=only_predict)
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=only_predict, max_length=max_length)
 
                 if only_predict:
-                    test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
-                    preds = predict(test_dataset, model, batch_size)
+                    test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True, max_length=max_length)
+                    preds, sig = predict(test_dataset, model, batch_size)
 
                     with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
                         json.dump(preds, f)
+
+                    with open(os.path.join(output_dir, f"probabilities.json"), 'w') as f:
+                        json.dump(sig.tolist(), f)
             
-                    return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
+                    return pd.DataFrame(), pd.DataFrame(), go.Figure(), pd.DataFrame(), ""
 
                 else:
                     test_results = trainer.predict(test_dataset)
                     logits = test_results.predictions
                     label_ids = test_results.label_ids
                     test_metrics = test_results.metrics
-                    preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+                    sig = torch.sigmoid(torch.tensor(logits))
+                    preds = (sig > 0.5).int().numpy()
 
                     # Log metrics to wandb
                     wandb.log(test_metrics)
+                    wandb.finish()
 
                     # Save metrics to JSON
                     metrics_json_path = os.path.join(output_dir, "metrics.json")
@@ -303,26 +278,29 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                     with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
                         json.dump(preds.tolist(), f)
 
-                    # save metric df and classification report
-                    metric_df.to_json('./results/test_results.json')
-                    report_df.to_json('./results/classification_report.json')
+                    with open(os.path.join(output_dir, f"probabilities.json"), 'w') as f:
+                        json.dump(sig.tolist(), f)
 
-                    return metric_df, report_df, cnf_matrix_fig, ""
+                    # save metric df and classification report
+                    metric_df.to_json(os.path.join(output_dir, 'test_results.json'))
+                    report_df.to_json(os.path.join(output_dir, 'classification_report.json'))
+
+                    return metric_df, report_df, cnf_matrix_fig, pd.DataFrame(), ""
                 
             else:
-                return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
+                return pd.DataFrame(), pd.DataFrame(), go.Figure(), pd.DataFrame(), ""
             
         # Catch potential OOM error
         except torch.cuda.OutOfMemoryError as e:
             message = "GPU out of memory. Try lowering the batch size or loading a smaller model!"
-            return None, None, None, message
+            return None, None, None, None, message
         
 
     # Only inference on test set using trained model
     elif 'Test' in operations and 'Train' not in operations:
-        tokenizer = AutoTokenizer.from_pretrained(model_name) # model_name = fine-tuned local model in this case
-
+    
         try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name) # model_name = fine-tuned local model in this case
             model = AutoModelForSequenceClassification.from_pretrained(model_name, ignore_mismatched_sizes=True)
         except OSError:
             raise gr.Error(f"Model could not be loaded from '{model_name}'. Please ensure the model is available.")
@@ -330,15 +308,14 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
         # Prepare the test dataset
         try:
             if only_predict:
-                print('predicting')
-                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True)
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=True, max_length=max_length)
                 preds = predict(test_dataset, model, batch_size)
 
                 # save predictions
                 with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
                     json.dump(preds, f)
 
-                return pd.DataFrame(), pd.DataFrame(), go.Figure(), ""
+                return pd.DataFrame(), pd.DataFrame(), go.Figure(), pd.DataFrame(), ""
 
 
             # only make predictions
@@ -350,7 +327,7 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                     classes = json.load(f)
                 mlb = MultiLabelBinarizer(classes=classes)
                 mlb.fit(test_df.labels.tolist())
-                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=False)
+                test_dataset = prepare_data(test_df, mlb, tokenizer, no_labels=False, max_length=max_length)
 
                 # Create a Trainer instance for evaluation
                 trainer = Trainer(
@@ -361,7 +338,8 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                 # Predict test set
                 test_results = trainer.predict(test_dataset)
                 logits = test_results.predictions
-                preds = (torch.sigmoid(torch.tensor(logits)) > 0.5).int().numpy()
+                sig = torch.sigmoid(torch.tensor(logits))
+                preds = (sig > 0.5).int().numpy()
                 preds = [p.tolist() for p in preds]   
 
                 label_ids = test_results.label_ids
@@ -392,13 +370,16 @@ def finetune_transformer(train_df, val_df, test_df, model_name, batch_size, lear
                 with open(os.path.join(output_dir, f"predictions.json"), 'w') as f:
                     json.dump(preds, f)
 
+                with open(os.path.join(output_dir, f"probabilities.json"), 'w') as f:
+                    json.dump(sig.tolist(), f)
+
                 # save metric df and classification report
                 metric_df.to_json('./results/test_results.json')
                 report_df.to_json('./results/classification_report.json')
 
-                return metric_df, report_df, cnf_matrix_fig, ""
+                return metric_df, report_df, cnf_matrix_fig, pd.DataFrame(), ""
             
         # Catch potential OOM error
         except torch.cuda.OutOfMemoryError as e:
             message = "GPU out of memory. Try lowering the batch size or loading a smaller model!"
-            return None, None, None, message
+            return None, None, None, None, message
