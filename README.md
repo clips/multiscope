@@ -14,4 +14,7 @@ Use Multiscope in Google Colab: https://colab.research.google.com/drive/1NexZF1C
 
 ### User interface
 1. Activate the ```multiscope``` conda environment: ```conda activate multiscope```
-2. To run the pipeline in a Gradio User Interface, run (CUDA_VISIBLE_DEVICES=X) ```python app.py``` and browse to http://127.0.0.1:7860. 
+2. First, run ```python setup_nltk.py``` to install all necessary NLTK-related files.
+3. To run the pipeline in a Gradio User Interface, run (CUDA_VISIBLE_DEVICES=X) ```python app.py``` and browse to http://127.0.0.1:7860. 
+
+
