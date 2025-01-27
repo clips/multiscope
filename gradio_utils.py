@@ -48,9 +48,9 @@ def update_button_text(operations):
 
 def toggle_subset_display(dataset_source):
     if dataset_source == 'HuggingFace':
-         return gr.update(visible=True)
+         return gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
     else:
-        return gr.update(visible=False)
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
                
 def toggle_hyperparameters(operations):
     if "Test" in operations and "Train" not in operations:

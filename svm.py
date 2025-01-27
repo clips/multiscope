@@ -199,8 +199,6 @@ def train_svm(
         X_test = test_df['text']
            
     # Define pipeline
-    
-
     if 'Train' in operations:
         with open(os.path.join(output_dir, 'classes.json'), 'w', encoding='utf8') as f:
             json.dump(list(mlb.classes_), f)

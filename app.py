@@ -53,6 +53,8 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source", value="Local", info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
             dataset_path = gr.Textbox(label="Dataset Path",  info="Enter the path to your local dataset or HuggingFace dataset.")
             hf_subset = gr.Textbox(label="Subset",  info="If applicable, select the subset of the HuggingFace dataset.", visible=False) 
+            label_col_name = gr.Textbox(label="Label Column",  info="Enter the name of the label column to be used.", visible=False, value='labels') 
+            text_col_name = gr.Textbox(label="Text Column",  info="Enter the name of the text column to be used.", visible=False, value='text') 
             operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", info="Select the operations to be done.")
         
         with gr.Row():
@@ -135,11 +137,11 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             gr.Markdown("### Classification and Inference")
             with gr.Row(equal_height=True):
                 metric_df = gr.Dataframe(label="Results", visible=True)
-                report_df = gr.Dataframe(label="Classification Report", visible=True)
+                report_df = gr.Dataframe(label="Classification Report", visible=True, interactive=False)
 
             with gr.Row(equal_height=True):
                 cnf_matrix = gr.Plot(label="Confusion Matrix", visible=True)
-                feature_df = gr.Dataframe(label="Most Informative Features", visible=False) # becomes visible only after training an SVM
+                feature_df = gr.Dataframe(label="Most Informative Features", visible=False, interactive=False) # becomes visible only after training an SVM
 
 
 # DOCUMENTATION_______________________________________________________________________________________________________________________________
@@ -287,7 +289,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=load_data_button
     ).then(
         fn=load_data,
-        inputs=[dataset_source, dataset_path, hf_subset, operations],
+        inputs=[dataset_source, dataset_path, hf_subset, text_col_name, label_col_name, operations],
         outputs=[train_df, val_df, test_df, display_df,
                  label_stats, token_stats,
                  label_counts_plot, correlation_matrix_plot] 
@@ -354,7 +356,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     dataset_source.change(
         fn=toggle_subset_display,
         inputs=dataset_source,
-        outputs=[hf_subset]
+        outputs=[hf_subset, text_col_name, label_col_name]
     )
 
     operations.change(

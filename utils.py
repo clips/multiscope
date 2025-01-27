@@ -193,13 +193,13 @@ def load_local_dataset(dataset_path, split):
         raise gr.Error("Please enter a path to the dataset.")
 
 
-def split_data(train_df, test_size):
+def split_data(train_df, column_name, test_size):
     train_df = train_df.reset_index()
     msss = MultilabelStratifiedShuffleSplit(n_splits=2, test_size=test_size, random_state=0)
     mlb = MultiLabelBinarizer()
 
     X = train_df['text'].values
-    y = mlb.fit_transform(train_df['labels'].values)
+    y = mlb.fit_transform(train_df[column_name].values)
 
     for train_index, val_index in msss.split(X, y):
         val_df = train_df.loc[val_index]
@@ -208,7 +208,7 @@ def split_data(train_df, test_size):
     return new_train_df, val_df   
 
 # Data loading function
-def load_data(dataset_source, dataset_path, dataset_subset, operations):
+def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, label_column_name, operations):
     if not operations:
         raise gr.Error("Please select 'Train', 'Test' or both. Please refresh the app to continue.")
 
@@ -217,9 +217,15 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
             dataset = load_huggingface_dataset(dataset_path,  dataset_subset)
             train_df = pd.DataFrame.from_dict(dataset['train'])
 
+            train_df['text'] = train_df[text_column_name]
+            train_df['labels'] = train_df[label_column_name]
+
             if 'val' not in dataset.keys():
                 try:
                     val_df = pd.DataFrame.from_dict(dataset['validation'])
+                    val_df.labels = val_df[label_column_name]
+                    val_df.text = val_df['text']
+
                 except KeyError:
                     train_df, val_df = split_data(train_df, test_size=0.15)
                 
@@ -232,7 +238,9 @@ def load_data(dataset_source, dataset_path, dataset_subset, operations):
         if 'Test' in operations:
             test_df = load_huggingface_dataset(dataset_path,  dataset_subset)
             test_df = pd.DataFrame.from_dict(dataset['test'])
-            test_df.labels = test_df.labels.apply(lambda x: [str(l) for l in x])
+            
+            test_df.text = test_df[text_column_name]
+            test_df.labels = test_df[label_column_name].apply(lambda x: [str(l) for l in x])
 
         else:
             test_df = pd.DataFrame()
