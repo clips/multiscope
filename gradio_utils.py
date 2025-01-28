@@ -46,6 +46,7 @@ def update_button_text(operations):
     else:
         return "Run"
 
+
 def toggle_subset_display(dataset_source):
     if dataset_source == 'HuggingFace':
          return gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
@@ -91,4 +92,8 @@ def toggle_feature_df(clf_method, operations):
     else:
         return(gr.update(visible=False))
     
-    
+def toggle_test_set_size(operations):
+    if 'Split Training Data' in operations:
+        return(gr.update(visible=True))
+    else:
+        return(gr.update(visible=False))
