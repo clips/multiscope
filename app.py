@@ -76,6 +76,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             with gr.Row("Dataset Stats"):   
                 label_stats = gr.Dataframe(label="Label Stats", visible=False, interactive=False)
                 token_stats = gr.Dataframe(label="Token Stats", visible=False, interactive=False)
+                bert_token_stats = gr.Dataframe(label="Wordpiece Token Stats", visible=False, interactive=False)
         
             with gr.Row("Graphs"):
                 label_counts_plot = gr.Plot(label="Class Counts", visible=False)
@@ -178,7 +179,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
           
         ## Data Operations
                      
-                     
+
         #### JSON files
         JSON files should adhere to the following structure:
                      
@@ -283,11 +284,11 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     # Load data function linking
     load_data_button.click( 
         fn=lambda: (gr.update(visible=True), gr.update(visible=True), 
-                    gr.update(visible=True), gr.update(visible=True), 
+                    gr.update(visible=True), gr.update(visible=True), gr.update(visible=True), 
                     gr.update(visible=False), gr.update(visible=False)),
         inputs=None,
         outputs=[dataset_statistics, display_df, 
-                 label_stats, token_stats, 
+                 label_stats, token_stats, bert_token_stats, 
                  label_counts_plot, correlation_matrix_plot]
     ).then(
         fn=lambda: gr.update(interactive=False),
@@ -297,7 +298,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         fn=load_data,
         inputs=[dataset_source, dataset_path, hf_subset, text_col_name, label_col_name, operations, val_portion, test_portion],
         outputs=[train_df, val_df, test_df, display_df,
-                 label_stats, token_stats,
+                 label_stats, token_stats, bert_token_stats,
                  label_counts_plot, correlation_matrix_plot] 
     ).then(
         fn=lambda: gr.update(interactive=True), # enable train model button after loading data 

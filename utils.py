@@ -16,11 +16,16 @@ from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from sklearn.preprocessing import MultiLabelBinarizer
 from ast import literal_eval
 import nltk
+from nltk.tokenize import wordpunct_tokenize
 
 
-def get_token_counts(texts):
+def get_bert_token_counts(texts):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     token_counts = [len(tokenizer.tokenize(text)) for text in texts]
+    return np.array(token_counts)
+
+def get_token_counts(texts):
+    token_counts = [len(wordpunct_tokenize(text.lower())) for text in texts]
     return np.array(token_counts)
 
 def create_cooccurrence_matrix(column_with_lists, cmap='OrRd'):
@@ -94,11 +99,14 @@ def get_label_stats(dfs, splits):
 
 
 
-def get_token_stats(dfs, splits):
+def get_token_stats(dfs, splits, token_type):
     token_stats = pd.DataFrame()
     
     for split, df in zip(splits, dfs):
-        token_counts = get_token_counts(df.text.tolist())
+        if token_type == 'word':
+            token_counts = get_token_counts(df.text.tolist())
+        else:
+            token_counts = get_bert_token_counts(df.text.tolist())
 
         max_tkn_cnt = max(token_counts)
         min_tkn_cnt = min(token_counts)
@@ -286,7 +294,8 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
         datasets = [train_df, val_df] if test_df.empty else [train_df, val_df, test_df]
         splits = ['train', 'val'] if test_df.empty else ['train', 'val', 'test']
         label_stats = get_label_stats(datasets, splits)
-        token_stats = get_token_stats(datasets, splits)
+        token_stats = get_token_stats(datasets, splits, 'word')
+        bert_token_stats = get_token_stats(datasets, splits, 'wordpiece')
 
         try:
             os.mkdir("./visualizations")
@@ -306,6 +315,7 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
 
             label_stats,
             token_stats,
+            bert_token_stats,
             gr.update(value=label_counts, visible=True),
             gr.update(value=correlation_matrix, visible=True)
         )
@@ -313,7 +323,8 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
     # only test 
     elif 'Test' in operations:
         label_stats = get_label_stats([test_df], ['test'])
-        token_stats = get_token_stats([test_df], ['test'])
+        token_stats = get_token_stats([test_df], ['test'], 'word')
+        bert_token_stats = get_token_stats([test_df], ['test'], 'wordpiece')
 
         if 'labels' in test_df.columns:
             label_counts = test_df['labels'].explode().value_counts().plot.bar(title='Class counts')
@@ -328,6 +339,7 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
 
                 gr.update(value=label_stats if 'labels' in test_df.columns else pd.DataFrame(), visible= True if 'labels' in test_df.columns else False),
                 token_stats, 
+                bert_token_stats,
                 gr.update(value=label_counts if 'labels' in test_df.columns else pd.DataFrame() , visible=True if 'labels' in test_df.columns else False),
                 gr.update(value=correlation_matrix if 'labels' in test_df.columns else go.Figure(), visible=True if 'labels' in test_df.columns else False))
     
