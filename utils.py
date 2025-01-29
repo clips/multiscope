@@ -259,7 +259,10 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
             else:
                 val_df = load_local_dataset(dataset_path, split="val")
         if 'Test' in operations:
-            test_df = load_local_dataset(dataset_path, split="test")
+            if "Make Test Set" in operations:    
+                train_df, test_df = split_data(train_df, label_column_name, test_size=test_portion)
+            else:
+                test_df = load_local_dataset(dataset_path, split="test")
         if 'Train' not in operations:
             train_df = pd.DataFrame()
         if 'Test' not in operations:

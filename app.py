@@ -176,7 +176,9 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         | TEXT | [label 1, label 2, ...] | train |
         | TEXT | [label 1, label 2, ...] | val |
           
-        
+        ## Data Operations
+                     
+                     
         #### JSON files
         JSON files should adhere to the following structure:
                      
