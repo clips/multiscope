@@ -208,7 +208,7 @@ def split_data(train_df, column_name, test_size):
     return new_train_df, val_df   
 
 # Data loading function
-def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, label_column_name, operations, test_portion):
+def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, label_column_name, operations, val_portion, test_portion):
     if not operations:
         raise gr.Error("Please select 'Train', 'Test' or both. Please refresh the app to continue.")
 
@@ -227,13 +227,16 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
                     val_df.text = val_df['text']
 
                 except KeyError:
-                    train_df, val_df = split_data(train_df, label_column_name, test_size=test_portion)
+                    train_df, val_df = split_data(train_df, label_column_name, test_size=val_portion)
                 
-            elif ('val' and 'validation' not in dataset.keys()) or 'Split Training Data' in operations:
-                train_df, val_df = split_data(train_df, label_column_name, test_size=test_portion)
+            elif ('val' and 'validation' not in dataset.keys()) or 'Make Validation Set' in operations:
+                train_df, val_df = split_data(train_df, label_column_name, test_size=val_portion)
 
             train_df.labels = train_df.labels.apply(lambda x: [str(l) for l in x])
             val_df.labels = val_df.labels.apply(lambda x: [str(l) for l in x])
+
+        if "Make Test Set" in operations:
+            train_df, test_df = split_data(train_df, label_column_name, test_size=test_portion)
 
         if 'Test' in operations:
             test_df = load_huggingface_dataset(dataset_path,  dataset_subset)
@@ -251,8 +254,8 @@ def load_data(dataset_source, dataset_path, dataset_subset, text_column_name, la
 
         if 'Train' in operations:
             train_df = load_local_dataset(dataset_path, split="train")
-            if 'Split Training Data' in operations:
-                train_df, val_df = split_data(train_df, label_column_name, test_size=test_portion)
+            if 'Make Validation Set' in operations:
+                train_df, val_df = split_data(train_df, label_column_name, test_size=val_portion)
             else:
                 val_df = load_local_dataset(dataset_path, split="val")
         if 'Test' in operations:

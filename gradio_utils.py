@@ -92,8 +92,7 @@ def toggle_feature_df(clf_method, operations):
     else:
         return(gr.update(visible=False))
     
-def toggle_test_set_size(operations):
-    if 'Split Training Data' in operations:
-        return(gr.update(visible=True))
-    else:
-        return(gr.update(visible=False))
+def toggle_set_sizes(operations):
+     return(gr.update(visible=True if 'Make Validation Set' in operations else False), 
+            gr.update(visible=True if 'Make Test Set' in operations else False)
+            )

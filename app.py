@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from utils import (load_data, train_model)
 from gradio_utils import (toggle_parameter_visibility,show_error, update_button_text, toggle_hyperparameters, toggle_data_display, 
-                          toggle_classification_results, toggle_subset_display, toggle_test_set_size, toggle_gridsearch_params, toggle_feature_df, wandb_integration)
+                          toggle_classification_results, toggle_subset_display, toggle_set_sizes, toggle_gridsearch_params, toggle_feature_df, wandb_integration)
 import wandb
 
 pd.options.plotting.backend = "plotly"
@@ -53,9 +53,12 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
             dataset_source = gr.Radio(["Local", "HuggingFace"], label="Dataset Source", value="Local", info="""Upload your own corpus or use a publicly available dataset from the HuggingFace hub.""")
             dataset_path = gr.Textbox(label="Dataset Path",  info="Enter the path to your local dataset or HuggingFace dataset.")
             hf_subset = gr.Textbox(label="Subset",  info="If applicable, select the subset of the HuggingFace dataset.", visible=False) 
+            
             label_col_name = gr.Textbox(label="Label Column",  info="Enter the name of the label column to be used.", visible=False, value='labels') 
             text_col_name = gr.Textbox(label="Text Column",  info="Enter the name of the text column to be used.", visible=False, value='text') 
-            operations = gr.CheckboxGroup(choices=["Train", "Test", "Split Training Data"], value=["Train", "Test"], label="Data Operations", info="Select the operations to be done.")
+            
+            operations = gr.CheckboxGroup(choices=["Train", "Test", "Make Validation Set", "Make Test Set"], value=["Train", "Test"], label="Data Operations", info="Select the operations to be done.")
+            val_portion = gr.Number(label="Validation Set Size", value=0.15, interactive=True, visible=False)
             test_portion = gr.Number(label="Test Set Size", value=0.15, interactive=True, visible=False)
         
         with gr.Row():
@@ -290,7 +293,7 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
         outputs=load_data_button
     ).then(
         fn=load_data,
-        inputs=[dataset_source, dataset_path, hf_subset, text_col_name, label_col_name, operations, test_portion],
+        inputs=[dataset_source, dataset_path, hf_subset, text_col_name, label_col_name, operations, val_portion, test_portion],
         outputs=[train_df, val_df, test_df, display_df,
                  label_stats, token_stats,
                  label_counts_plot, correlation_matrix_plot] 
@@ -367,9 +370,9 @@ with gr.Blocks(title="MultiScope", theme=theme, css=css) as demo:
     )
 
     operations.change(
-        fn=toggle_test_set_size,
+        fn=toggle_set_sizes,
         inputs=operations,
-        outputs=test_portion
+        outputs=[val_portion, test_portion]
     )
 
     operations.change(
