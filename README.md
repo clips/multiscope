@@ -17,5 +17,5 @@ Use Multiscope in Google Colab: https://colab.research.google.com/drive/1NexZF1C
 2. First, run ```python setup_nltk.py``` to install all necessary NLTK-related files.
 3. To run the pipeline in a Gradio User Interface, run (CUDA_VISIBLE_DEVICES=X) ```python app.py``` and browse to http://127.0.0.1:7860. 
 
-# How to cite
+### How to cite
 Jens Van Nooten and Walter Daelemans. 2024. Multiscope: A User-Friendly Multi-Label Text Classification Dashboard. CLiPS Technical Report Series 11 (CTRS 11). ISSN 2033-3544. Computational Linguistics, Psycholinguistics, and Sociolinguistics Research Center.
